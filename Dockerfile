@@ -10,8 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Poetry
 RUN pip install --no-cache-dir poetry
 
-# Copy dependency files first for layer caching
-COPY pyproject.toml poetry.lock* ./
+# Copy full project so Poetry can validate all included files (e.g. README.md)
+COPY . .
 
 # Regenerate lock if out of sync, then install deps
 RUN poetry config virtualenvs.create false \
@@ -24,9 +24,6 @@ RUN poetry config virtualenvs.create false \
 # Install Playwright Chromium for PDF generation
 RUN pip install --no-cache-dir playwright \
     && playwright install --with-deps chromium
-
-# Copy application code
-COPY . .
 
 # Default port; Railway overrides this with its own PORT env var
 ENV PORT=8080
