@@ -17,6 +17,9 @@ COPY pyproject.toml poetry.lock* ./
 RUN poetry config virtualenvs.create false \
     && poetry lock --no-update 2>/dev/null; \
     poetry install --no-interaction --no-ansi --extras web --without dev
+# Install dependencies (no dev deps, web extra only)
+RUN poetry config virtualenvs.create false \
+    && poetry install --no-interaction --no-ansi --extras web --without dev
 
 # Install Playwright Chromium for PDF generation
 RUN pip install --no-cache-dir playwright \
