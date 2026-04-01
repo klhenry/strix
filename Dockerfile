@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir poetry
 
 # Copy dependency files first for layer caching
 COPY pyproject.toml poetry.lock* ./
+COPY README.md ./
 
 # Regenerate lock if out of sync, then install deps
 RUN poetry config virtualenvs.create false \
