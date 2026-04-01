@@ -1,0 +1,166 @@
+{
+  "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "strix",
+          "informationUri": "https://github.com/usestrix/strix",
+          "rules": [
+            {
+              "id": "vuln-0001",
+              "shortDescription": {
+                "text": "SQL Injection in Login Endpoint"
+              },
+              "fullDescription": {
+                "text": "User input is passed directly to a SQL query without sanitization."
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "severity": "critical",
+                "cvss": 9.8,
+                "cvss-vector": "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                "cwe": "CWE-89"
+              },
+              "help": {
+                "text": "Use parameterized queries instead of string concatenation."
+              }
+            },
+            {
+              "id": "vuln-0002",
+              "shortDescription": {
+                "text": "Cross-Site Scripting (XSS) in Search"
+              },
+              "fullDescription": {
+                "text": "Reflected XSS in the search parameter allows script injection."
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "severity": "high",
+                "cvss": 7.1,
+                "cvss-vector": "AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+                "cwe": "CWE-79"
+              },
+              "help": {
+                "text": "HTML-encode all user input before rendering in the page."
+              }
+            },
+            {
+              "id": "vuln-0003",
+              "shortDescription": {
+                "text": "Missing Rate Limiting on Password Reset"
+              },
+              "fullDescription": {
+                "text": "The password reset endpoint has no rate limiting."
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "severity": "medium",
+                "cvss": 5.3
+              },
+              "help": {
+                "text": "Add rate limiting (e.g., 5 requests per minute per IP)."
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "vuln-0001",
+          "level": "error",
+          "message": {
+            "text": "User input is passed directly to a SQL query without sanitization."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/db/queries.ts"
+                },
+                "region": {
+                  "startLine": 42,
+                  "endLine": 45
+                }
+              },
+              "message": {
+                "text": "Unsanitized input used in SQL query"
+              }
+            }
+          ],
+          "fixes": [
+            {
+              "description": {
+                "text": "Fix for src/db/queries.ts"
+              },
+              "artifactChanges": [
+                {
+                  "artifactLocation": {
+                    "uri": "src/db/queries.ts"
+                  },
+                  "replacements": [
+                    {
+                      "deletedRegion": {
+                        "startLine": 42,
+                        "endLine": 45
+                      },
+                      "insertedContent": {
+                        "text": "const query = 'SELECT * FROM users WHERE name = $1';\nconst result = await db.query(query, [name]);"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "target": "https://example.com",
+            "endpoint": "/api/login",
+            "method": "POST"
+          }
+        },
+        {
+          "ruleId": "vuln-0002",
+          "level": "error",
+          "message": {
+            "text": "Reflected XSS in the search parameter allows script injection."
+          },
+          "properties": {
+            "target": "https://example.com",
+            "endpoint": "/search",
+            "method": "GET"
+          }
+        },
+        {
+          "ruleId": "vuln-0003",
+          "level": "warning",
+          "message": {
+            "text": "The password reset endpoint has no rate limiting."
+          },
+          "properties": {
+            "target": "https://example.com",
+            "endpoint": "/api/reset",
+            "method": "POST"
+          }
+        }
+      ],
+      "automationDetails": {
+        "id": "test-run-001"
+      },
+      "invocations": [
+        {
+          "executionSuccessful": true,
+          "startTimeUtc": "2026-03-23T10:00:00+00:00",
+          "endTimeUtc": "2026-03-23T10:30:00+00:00"
+        }
+      ]
+    }
+  ]
+}
