@@ -1,4 +1,5 @@
 [tool.poetry]
+package-mode = false
 name = "strix-agent"
 version = "0.8.3"
 description = "Open-source AI Hackers for your apps"
