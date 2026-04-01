@@ -3,7 +3,6 @@ name = "strix-agent"
 version = "0.8.3"
 description = "Open-source AI Hackers for your apps"
 authors = ["Strix <hi@usestrix.com>"]
-readme = "README.md"
 package-mode = false
 license = "Apache-2.0"
 keywords = [
