@@ -28,8 +28,8 @@ RUN pip install --no-cache-dir playwright \
 # Copy application code
 COPY . .
 
-# Railway sets PORT env var
-ENV PORT=8420
-EXPOSE 8420
+# Default port; Railway overrides this with its own PORT env var
+ENV PORT=8080
+EXPOSE 8080
 
-CMD ["python", "-m", "strix.web", "--host", "0.0.0.0"]
+CMD python -m strix.web --host 0.0.0.0 --port $PORT
