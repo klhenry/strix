@@ -1,9 +1,11 @@
+import logging
 import threading
 from datetime import UTC, datetime
 from typing import Any, Literal
 
 from strix.tools.registry import register_tool
 
+logger = logging.getLogger(__name__)
 
 _agent_graph: dict[str, Any] = {
     "nodes": {},
@@ -21,8 +23,41 @@ _agent_instances: dict[str, Any] = {}
 _agent_states: dict[str, Any] = {}
 
 
+def force_stop_all_subagents(root_agent_id: str | None = None) -> list[str]:
+    """Force-stop all running sub-agents (excluding root). Returns list of stopped agent IDs."""
+    stopped = []
+    for agent_id, node in list(_agent_graph["nodes"].items()):
+        if agent_id == root_agent_id:
+            continue
+        if node.get("status") in ("running", "stopping"):
+            # Try graceful cancel first
+            agent_instance = _agent_instances.get(agent_id)
+            if agent_instance and hasattr(agent_instance, "cancel_current_execution"):
+                try:
+                    agent_instance.cancel_current_execution()
+                except Exception:
+                    pass
+            # Also set stop flag on state
+            agent_state = _agent_states.get(agent_id)
+            if agent_state:
+                agent_state.stop_requested = True
+            # Mark as force-completed in graph
+            node["status"] = "force_stopped"
+            node["finished_at"] = datetime.now(UTC).isoformat()
+            node["result"] = {"force_stopped": True, "reason": "finish_scan force-close"}
+            # Clean up tracking
+            _running_agents.pop(agent_id, None)
+            _agent_instances.pop(agent_id, None)
+            stopped.append(agent_id)
+            logger.info("Force-stopped sub-agent %s (%s)", node.get("name"), agent_id)
+    return stopped
+
+
 def _run_agent_in_thread(
-    agent: Any, state: Any, inherited_messages: list[dict[str, Any]]
+    agent: Any,
+    state: Any,
+    inherited_messages: list[dict[str, Any]],
+    wall_clock_timeout: int = 1800,
 ) -> dict[str, Any]:
     try:
         if inherited_messages:
@@ -40,9 +75,11 @@ def _run_agent_in_thread(
             else "started with a fresh context"
         )
 
+        timeout_minutes = wall_clock_timeout // 60
+
         task_xml = f"""<agent_delegation>
     <identity>
-        ⚠️ You are NOT your parent agent. You are a NEW, SEPARATE sub-agent (not root).
+        You are a NEW, SEPARATE sub-agent (not root).
 
         Your Info: {state.agent_name} ({state.agent_id})
         Parent Info: {parent_name} ({state.parent_id})
@@ -64,6 +101,9 @@ def _run_agent_in_thread(
         - All agents share /workspace directory and proxy history for better collaboration
         - You can see files created by other agents and proxy traffic from previous work
         - Build upon previous work but focus on your specific delegated task
+        - IMPORTANT: You have a hard time limit of {timeout_minutes} minutes.
+          Complete your work and call agent_finish before time runs out.
+          Do NOT enter waiting states or ask for user input — work autonomously.
     </instructions>
 </agent_delegation>"""
 
@@ -75,6 +115,100 @@ def _run_agent_in_thread(
 
         import asyncio
 
+        # Stall detector: every STALL_CHECK_INTERVAL seconds, check if the agent
+        # made progress (iteration count changed). If stalled, nudge it by
+        # cancelling the current call and injecting a "keep going" message.
+        # After wall_clock_timeout total, force-stop.
+        STALL_CHECK_INTERVAL = 600  # 10 minutes
+        timed_out = False
+
+        def _stall_detector():
+            nonlocal timed_out
+            import time
+
+            last_iteration = getattr(state, "iteration", 0)
+            nudge_count = 0
+            start = time.monotonic()
+
+            while True:
+                time.sleep(STALL_CHECK_INTERVAL)
+                elapsed = time.monotonic() - start
+
+                # Hard wall-clock timeout — force stop
+                if elapsed >= wall_clock_timeout:
+                    timed_out = True
+                    logger.warning(
+                        "Sub-agent %s (%s) hit wall-clock timeout of %ds — force-stopping",
+                        state.agent_name,
+                        state.agent_id,
+                        wall_clock_timeout,
+                    )
+                    state.stop_requested = True
+                    if hasattr(agent, "cancel_current_execution"):
+                        try:
+                            agent.cancel_current_execution()
+                        except Exception:
+                            pass
+                    return
+
+                current_iteration = getattr(state, "iteration", 0)
+
+                if current_iteration == last_iteration:
+                    # Agent hasn't made progress — nudge it
+                    nudge_count += 1
+                    logger.info(
+                        "Sub-agent %s stalled at iteration %d for %ds — nudging (nudge #%d)",
+                        state.agent_name,
+                        current_iteration,
+                        STALL_CHECK_INTERVAL,
+                        nudge_count,
+                    )
+
+                    # Inject a nudge message into the agent's message queue
+                    nudge_msg = (
+                        f"You appear to be stalled. Keep going — continue working on your task. "
+                        f"You have used {current_iteration} iterations. "
+                        f"If you have completed your work, call agent_finish to report back. "
+                        f"If you are waiting for something, stop waiting and take action."
+                    )
+                    if state.agent_id not in _agent_messages:
+                        _agent_messages[state.agent_id] = []
+                    _agent_messages[state.agent_id].append(
+                        {
+                            "id": f"nudge_{state.agent_id[:8]}_{nudge_count}",
+                            "from": "user",
+                            "to": state.agent_id,
+                            "content": nudge_msg,
+                            "message_type": "instruction",
+                            "priority": "high",
+                            "timestamp": datetime.now(UTC).isoformat(),
+                            "delivered": True,
+                            "read": False,
+                        }
+                    )
+
+                    # Cancel the current blocked call so the agent re-enters
+                    # the loop and picks up the nudge message
+                    if hasattr(agent, "cancel_current_execution"):
+                        try:
+                            agent.cancel_current_execution()
+                        except Exception:
+                            pass
+                else:
+                    # Agent made progress — reset
+                    nudge_count = 0
+
+                last_iteration = current_iteration
+
+                # If agent is done, exit
+                if getattr(state, "stop_requested", False):
+                    return
+
+        stall_thread = threading.Thread(
+            target=_stall_detector, daemon=True, name=f"StallDetector-{state.agent_id}"
+        )
+        stall_thread.start()
+
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
@@ -82,22 +216,73 @@ def _run_agent_in_thread(
         finally:
             loop.close()
 
+        if timed_out:
+            result = {
+                "timeout": True,
+                "message": f"Agent timed out after {timeout_minutes} minutes",
+            }
+
     except Exception as e:
         _agent_graph["nodes"][state.agent_id]["status"] = "error"
         _agent_graph["nodes"][state.agent_id]["finished_at"] = datetime.now(UTC).isoformat()
         _agent_graph["nodes"][state.agent_id]["result"] = {"error": str(e)}
         _running_agents.pop(state.agent_id, None)
         _agent_instances.pop(state.agent_id, None)
+        # Notify parent about the error
+        parent_id = state.parent_id
+        if parent_id and parent_id in _agent_messages:
+            _agent_messages[parent_id].append(
+                {
+                    "id": f"thread_err_{state.agent_id[:8]}",
+                    "from": state.agent_id,
+                    "to": parent_id,
+                    "content": f"Sub-agent '{state.agent_name}' crashed with error: {e}",
+                    "message_type": "information",
+                    "priority": "high",
+                    "timestamp": datetime.now(UTC).isoformat(),
+                    "delivered": True,
+                    "read": False,
+                }
+            )
         raise
     else:
+        timed_out = isinstance(result, dict) and result.get("timeout")
         if state.stop_requested:
-            _agent_graph["nodes"][state.agent_id]["status"] = "stopped"
+            _agent_graph["nodes"][state.agent_id]["status"] = "timed_out" if timed_out else "stopped"
         else:
             _agent_graph["nodes"][state.agent_id]["status"] = "completed"
         _agent_graph["nodes"][state.agent_id]["finished_at"] = datetime.now(UTC).isoformat()
         _agent_graph["nodes"][state.agent_id]["result"] = result
         _running_agents.pop(state.agent_id, None)
         _agent_instances.pop(state.agent_id, None)
+
+        # Notify parent agent so it wakes up from wait_for_message
+        parent_id = state.parent_id
+        if parent_id and parent_id in _agent_messages:
+            status_label = "timed out" if timed_out else "completed"
+            report_msg = (
+                f"Sub-agent '{state.agent_name}' ({state.agent_id}) has {status_label}.\n"
+                f"Result: {str(result)[:500]}"
+            )
+            _agent_messages[parent_id].append(
+                {
+                    "id": f"thread_done_{state.agent_id[:8]}",
+                    "from": state.agent_id,
+                    "to": parent_id,
+                    "content": report_msg,
+                    "message_type": "information",
+                    "priority": "high",
+                    "timestamp": datetime.now(UTC).isoformat(),
+                    "delivered": True,
+                    "read": False,
+                }
+            )
+            logger.info(
+                "Notified parent %s that sub-agent %s %s",
+                parent_id,
+                state.agent_name,
+                status_label,
+            )
 
         return {"result": result}
 
@@ -195,6 +380,19 @@ def create_agent(
     try:
         parent_id = agent_state.agent_id
 
+        # Block sub-agent creation in vuln_scan mode
+        parent_agent = _agent_instances.get(parent_id)
+        if parent_agent and hasattr(parent_agent, "llm_config"):
+            if getattr(parent_agent.llm_config, "scan_mode", "") == "vuln_scan":
+                return {
+                    "success": False,
+                    "error": "Sub-agents are not allowed in vulnerability scan mode. Work as a single agent.",
+                    "agent_id": None,
+                }
+
+        from strix.agents import StrixAgent
+        from strix.agents.state import AgentState
+        from strix.llm.config import LLMConfig
         from strix.skills import parse_skill_list, validate_requested_skills
 
         skill_list = parse_skill_list(skills)
@@ -206,12 +404,6 @@ def create_agent(
                 "agent_id": None,
             }
 
-        from strix.agents import StrixAgent
-        from strix.agents.state import AgentState
-        from strix.llm.config import LLMConfig
-
-        parent_agent = _agent_instances.get(parent_id)
-
         timeout = None
         scan_mode = "deep"
         interactive = False
@@ -222,12 +414,16 @@ def create_agent(
                 scan_mode = parent_agent.llm_config.scan_mode
             interactive = getattr(parent_agent.llm_config, "interactive", False)
 
+        parent_llm_config = getattr(parent_agent, "llm_config", None)
+        sub_max_iter = getattr(parent_llm_config, "sub_agent_max_iterations", 150)
+        sub_timeout = getattr(parent_llm_config, "sub_agent_timeout", 1800)
+
         state = AgentState(
             task=task,
             agent_name=name,
             parent_id=parent_id,
-            max_iterations=300,
-            waiting_timeout=300 if interactive else 600,
+            max_iterations=sub_max_iter,
+            waiting_timeout=300 if interactive else 10,  # Non-interactive sub-agents auto-resume in 10s
         )
 
         llm_config = LLMConfig(
@@ -252,7 +448,7 @@ def create_agent(
 
         thread = threading.Thread(
             target=_run_agent_in_thread,
-            args=(agent, state, inherited_messages),
+            args=(agent, state, inherited_messages, sub_timeout),
             daemon=True,
             name=f"Agent-{name}-{state.agent_id}",
         )

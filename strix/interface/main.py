@@ -346,13 +346,14 @@ Examples:
         "-m",
         "--scan-mode",
         type=str,
-        choices=["quick", "standard", "deep"],
+        choices=["quick", "standard", "deep", "vuln_scan"],
         default="deep",
         help=(
             "Scan mode: "
             "'quick' for fast CI/CD checks, "
             "'standard' for routine testing, "
-            "'deep' for thorough security reviews (default). "
+            "'deep' for thorough security reviews (default), "
+            "'vuln_scan' for lightweight vulnerability identification without exploitation. "
             "Default: deep."
         ),
     )

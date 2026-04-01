@@ -1,0 +1,59 @@
+<div class="page-break"></div>
+<div class="page-header">
+  {% if logo_b64 %}<img class="header-logo-img" src="data:image/png;base64,{{ logo_b64 }}" alt="Accountable">{% else %}<span class="page-header-logo">Accountable</span>{% endif %}
+  <span class="page-header-center">{{ report.metadata.report_title | upper }} &nbsp;|&nbsp; CONFIDENTIAL</span>
+  <span class="page-header-right">{% if client_name %}{{ client_name }} &nbsp;|&nbsp; {% endif %}{{ generated_at[:10] if generated_at|length > 10 else generated_at }}</span>
+</div>
+
+<div class="page-content">
+  <h1 class="section-heading" id="executive-summary">1. Executive Summary</h1>
+  <div class="section-divider"></div>
+
+  {% if report.executive_summary %}
+  <div class="callout">
+    <strong>What This Means:</strong> {{ report.executive_summary | e }}
+  </div>
+  {% endif %}
+
+  <h2 class="sub-heading">Findings Overview</h2>
+  {% set counts = report.severity_counts %}
+  <table class="findings-overview">
+    <thead>
+      <tr><th>Severity</th><th>Count</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="severity-badge severity-critical">Critical</span></td>
+        <td>{{ counts.critical }}</td>
+        <td>{% if counts.critical == 0 %}No critical vulnerabilities identified{% else %}{{ counts.critical }} critical vulnerabilit{{ 'y' if counts.critical == 1 else 'ies' }} requiring immediate attention{% endif %}</td>
+      </tr>
+      <tr>
+        <td><span class="severity-badge severity-high">High</span></td>
+        <td>{{ counts.high }}</td>
+        <td>{% if counts.high == 0 %}No high-severity vulnerabilities identified{% else %}{{ counts.high }} high-severity vulnerabilit{{ 'y' if counts.high == 1 else 'ies' }} requiring prompt remediation{% endif %}</td>
+      </tr>
+      <tr>
+        <td><span class="severity-badge severity-medium">Medium</span></td>
+        <td>{{ counts.medium }}</td>
+        <td>{% if counts.medium == 0 %}No medium-severity vulnerabilities identified{% else %}{{ counts.medium }} medium-severity finding{{ 's' if counts.medium != 1 else '' }} recommended for remediation{% endif %}</td>
+      </tr>
+      <tr>
+        <td><span class="severity-badge severity-low">Low</span></td>
+        <td>{{ counts.low }}</td>
+        <td>{% if counts.low == 0 %}No low-severity vulnerabilities identified{% else %}{{ counts.low }} low-severity finding{{ 's' if counts.low != 1 else '' }} for consideration{% endif %}</td>
+      </tr>
+      {% if counts.info %}
+      <tr>
+        <td><span class="severity-badge severity-info">Info</span></td>
+        <td>{{ counts.info }}</td>
+        <td>{{ counts.info }} informational finding{{ 's' if counts.info != 1 else '' }}</td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
+
+  {% if report.technical_analysis %}
+  <h2 class="sub-heading">Key Takeaways</h2>
+  <div class="finding-text">{{ report.technical_analysis | e }}</div>
+  {% endif %}
+</div>

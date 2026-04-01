@@ -36,13 +36,19 @@ include = [
   "LICENSE",
   "README.md",
   "strix/agents/**/*.jinja",
+  "strix/reporting/templates/*.jinja",
+  "strix/reporting/templates/*.css",
+  "strix/reporting/templates/*.png",
   "strix/skills/**/*.md",
   "strix/**/*.xml",
-  "strix/**/*.tcss"
+  "strix/**/*.tcss",
+  "strix/web/templates/**/*.html",
+  "strix/web/static/**/*"
 ]
 
 [tool.poetry.scripts]
 strix = "strix.interface.main:main"
+strix-web = "strix.web:run_server"
 
 [tool.poetry.dependencies]
 python = "^3.12"
@@ -78,6 +84,7 @@ defusedxml = "^0.7.1"
 [tool.poetry.extras]
 vertex = ["google-cloud-aiplatform"]
 sandbox = ["fastapi", "uvicorn", "ipython", "openhands-aci", "playwright", "gql", "pyte", "libtmux", "numpydoc"]
+web = ["fastapi", "uvicorn"]
 
 [tool.poetry.group.dev.dependencies]
 # Type checking and static analysis

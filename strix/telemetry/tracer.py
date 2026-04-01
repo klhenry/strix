@@ -755,6 +755,46 @@ class Tracer:
                     )
                 logger.info("Updated vulnerability index: %s", vuln_csv_file)
 
+            if mark_complete:
+                try:
+                    from strix.reporting.html_report import generate_html_report
+                    from strix.reporting.json_report import generate_json_summary
+                    from strix.reporting.models import ScanReport
+                    from strix.reporting.sarif_report import generate_sarif_report
+
+                    scan_report = ScanReport.from_tracer(self)
+
+                    scan_config = self.scan_config or {}
+                    is_vuln_scan = scan_config.get("scan_mode") == "vuln_scan"
+                    report_basename = "vulnerability_scan_report" if is_vuln_scan else "penetration_test_report"
+
+                    generate_html_report(scan_report, run_dir / f"{report_basename}.html")
+                    generate_sarif_report(scan_report, run_dir / "results.sarif")
+                    generate_json_summary(scan_report, run_dir / "report.json")
+
+                    try:
+                        from strix.reporting.pdf_report import generate_pdf_report_sync
+
+                        html_path = run_dir / f"{report_basename}.html"
+                        pdf_path = run_dir / f"{report_basename}.pdf"
+
+                        # Try up to 2 times — Playwright can be flaky
+                        pdf_result = None
+                        for attempt in range(2):
+                            pdf_result = generate_pdf_report_sync(html_path, pdf_path)
+                            if pdf_result and pdf_result.exists() and pdf_result.stat().st_size > 0:
+                                logger.info("Generated PDF report: %s (%d KB)", pdf_path, pdf_path.stat().st_size // 1024)
+                                break
+                            if attempt == 0:
+                                logger.warning("PDF generation attempt 1 failed, retrying...")
+                        else:
+                            if not (pdf_path.exists() and pdf_path.stat().st_size > 0):
+                                logger.error("PDF generation failed after 2 attempts for %s", run_dir)
+                    except ImportError:
+                        logger.warning("Playwright not installed — PDF report not generated. Run: pip install playwright && python -m playwright install chromium")
+                except Exception:
+                    logger.exception("Failed to generate additional report formats")
+
             logger.info("📊 Essential scan data saved to: %s", run_dir)
             if mark_complete and not self._run_completed_emitted:
                 self._emit_event(

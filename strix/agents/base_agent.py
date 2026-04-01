@@ -75,7 +75,9 @@ class BaseAgent(metaclass=AgentMeta):
 
         self.interactive = getattr(self.llm_config, "interactive", False)
         if self.interactive and self.state.parent_id is None:
-            self.state.waiting_timeout = 0
+            self.state.waiting_timeout = 0  # Interactive root: wait forever for user
+        elif not self.interactive:
+            self.state.waiting_timeout = 15  # Non-interactive: auto-resume after 15s
         self.llm = LLM(self.llm_config, agent_name=self.agent_name)
 
         with contextlib.suppress(Exception):
@@ -263,7 +265,19 @@ class BaseAgent(metaclass=AgentMeta):
 
         if self.state.has_waiting_timeout():
             self.state.resume_from_waiting()
-            self.state.add_message("user", "Waiting timeout reached. Resuming execution.")
+            # Give a contextual nudge based on whether this is a sub-agent
+            if self.state.parent_id:
+                nudge = (
+                    "Keep going. You are a sub-agent running autonomously — do not wait for "
+                    "user input. Continue working on your task. If you have completed your "
+                    "work, call agent_finish immediately to report back to your parent."
+                )
+            else:
+                nudge = (
+                    "Keep going. Continue working on the scan. If all sub-agents have "
+                    "finished, call finish_scan. If work remains, continue executing."
+                )
+            self.state.add_message("user", nudge)
 
             from strix.telemetry.tracer import get_global_tracer
 

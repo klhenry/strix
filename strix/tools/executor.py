@@ -235,6 +235,7 @@ def _format_tool_result(tool_name: str, result: Any) -> tuple[str, list[dict[str
                 "image_url": {"url": f"data:image/png;base64,{screenshot_data}"},
             }
         )
+        _persist_screenshot(screenshot_data, tool_name)
         result_str = remove_screenshot_from_result(result)
     else:
         result_str = result
@@ -362,3 +363,20 @@ def remove_screenshot_from_result(result: Any) -> Any:
         result_copy["screenshot"] = "[Image data extracted - see attached image]"
 
     return result_copy
+
+
+def _persist_screenshot(screenshot_b64: str, tool_name: str) -> None:
+    """Save a screenshot to the run's evidence directory (best-effort)."""
+    try:
+        from datetime import UTC, datetime
+
+        from strix.reporting.evidence import save_screenshot
+        from strix.telemetry.tracer import get_global_tracer
+
+        tracer = get_global_tracer()
+        if tracer:
+            timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+            save_screenshot(screenshot_b64, tracer.get_run_dir(), tool_name, timestamp)
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).debug("Failed to persist screenshot for %s", tool_name, exc_info=True)

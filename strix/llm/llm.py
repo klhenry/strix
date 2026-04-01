@@ -76,7 +76,7 @@ class LLM:
             self._reasoning_effort = reasoning
         elif config.reasoning_effort:
             self._reasoning_effort = config.reasoning_effort
-        elif config.scan_mode == "quick":
+        elif config.scan_mode in ("quick", "vuln_scan"):
             self._reasoning_effort = "medium"
         else:
             self._reasoning_effort = "high"
@@ -172,10 +172,23 @@ class LLM:
         chunks: list[Any] = []
         done_streaming = 0
 
+        # Per-chunk timeout: if no new chunk arrives within this window, treat
+        # the stream as dead and raise TimeoutError (will trigger retry logic).
+        chunk_timeout = 120
+
         self._total_stats.requests += 1
         response = await acompletion(**self._build_completion_args(messages), stream=True)
 
-        async for chunk in response:
+        aiter = response.__aiter__()
+        while True:
+            try:
+                chunk = await asyncio.wait_for(aiter.__anext__(), timeout=chunk_timeout)
+            except StopAsyncIteration:
+                break
+            except asyncio.TimeoutError:
+                raise TimeoutError(  # noqa: B904
+                    f"LLM stream stalled — no chunk received in {chunk_timeout}s"
+                )
             chunks.append(chunk)
             if done_streaming:
                 done_streaming += 1

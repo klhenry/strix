@@ -1,0 +1,68 @@
+<h2 class="sub-heading" id="{{ vuln.id }}">4.{{ vuln_index }} {{ vuln.title }}</h2>
+
+<table class="finding-header-table">
+  <tr><td>ID</td><td>{{ vuln.id | upper }}</td></tr>
+  <tr><td>Severity</td><td><span class="severity-badge severity-{{ vuln.severity | lower }}">{{ vuln.severity | capitalize }}</span></td></tr>
+  <tr><td>CVSS Score</td><td>{% if vuln.cvss is not none %}{{ vuln.cvss }}{% if vuln.cvss_breakdown %} ({{ vuln.cvss_breakdown.to_vector_string() }}){% endif %}{% else %}N/A{% endif %}</td></tr>
+  <tr><td>Affected Asset</td><td>{{ vuln.target | e }}{% if vuln.endpoint %} &mdash; {{ vuln.endpoint | e }}{% endif %}</td></tr>
+  {% if vuln.cve %}<tr><td>CVE</td><td>{{ vuln.cve }}</td></tr>{% endif %}
+  {% if vuln.cwe %}<tr><td>CWE</td><td>{{ vuln.cwe }}</td></tr>{% endif %}
+</table>
+
+{% if vuln.description %}
+<div class="callout">
+  <strong>What This Means:</strong> {{ vuln.description | e }}
+</div>
+{% endif %}
+
+{% if vuln.technical_analysis %}
+<div class="finding-section-title">Technical Description</div>
+<div class="finding-text">{{ vuln.technical_analysis | e }}</div>
+{% endif %}
+
+{% if vuln.code_locations %}
+<div class="finding-section-title">Code Locations</div>
+{% for loc in vuln.code_locations %}
+<div class="code-location">
+  <div class="file-ref">{{ loc.file }}{% if loc.start_line %}:{{ loc.start_line }}{% if loc.end_line and loc.end_line != loc.start_line %}-{{ loc.end_line }}{% endif %}{% endif %}</div>
+  {% if loc.label %}<div class="label">{{ loc.label | e }}</div>{% endif %}
+  {% if loc.snippet %}
+  <pre><code>{{ loc.snippet | e }}</code></pre>
+  {% endif %}
+  {% if loc.fix_before or loc.fix_after %}
+  <pre>{% if loc.fix_before %}{% for line in loc.fix_before.splitlines() %}<span class="diff-line-remove">- {{ line | e }}</span>{% endfor %}{% endif %}{% if loc.fix_after %}{% for line in loc.fix_after.splitlines() %}<span class="diff-line-add">+ {{ line | e }}</span>{% endfor %}{% endif %}</pre>
+  {% endif %}
+</div>
+{% endfor %}
+{% endif %}
+
+{% if vuln.poc_description or vuln.poc_script_code %}
+<div class="finding-section-title">Evidence</div>
+{% if vuln.poc_description %}
+<div class="finding-text">{{ vuln.poc_description | e }}</div>
+{% endif %}
+{% if vuln.poc_script_code %}
+<pre><code>{{ vuln.poc_script_code | e }}</code></pre>
+{% endif %}
+{% endif %}
+
+{% if evidence.get(vuln.id) %}
+<div class="finding-section-title">Screenshots</div>
+{% for img_data in evidence[vuln.id] %}
+<img class="evidence-img" src="data:image/png;base64,{{ img_data }}" alt="Evidence for {{ vuln.id }}">
+{% endfor %}
+{% endif %}
+
+{% if vuln.impact %}
+<div class="finding-section-title">Impact</div>
+<div class="finding-text">{{ vuln.impact | e }}</div>
+{% endif %}
+
+{% if vuln.remediation_steps %}
+<div class="finding-section-title">Remediation Steps</div>
+<div class="finding-text">{{ vuln.remediation_steps | e }}</div>
+{% endif %}
+
+{% if not is_last %}
+<hr style="border:none;border-top:1px solid #e2e8f0;margin:32px 0;">
+{% endif %}

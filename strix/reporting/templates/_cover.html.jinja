@@ -1,0 +1,38 @@
+<div class="cover-page">
+  {% if logo_b64 %}
+  <img class="cover-logo-img" src="data:image/png;base64,{{ logo_b64 }}" alt="Accountable">
+  {% else %}
+  <div class="cover-logo">Accountable</div>
+  {% endif %}
+
+  <h1 class="cover-title">{{ report.metadata.report_title }}</h1>
+  {% if client_name %}
+  <div class="cover-client">{{ client_name }}</div>
+  {% endif %}
+
+  <div class="cover-meta">
+    <div>Report Date: <strong>{{ generated_at }}</strong></div>
+    {% if report.metadata.start_time and report.metadata.end_time %}
+    <div>Test Period: <strong>{{ report.metadata.start_time[:10] }} &ndash; {{ report.metadata.end_time[:10] }}</strong></div>
+    {% endif %}
+    <div>Report ID: <strong>{{ report.metadata.run_id | upper }}</strong></div>
+    <div>Classification: <strong>CONFIDENTIAL</strong></div>
+    <div>Prepared By: <strong>Accountable HQ</strong></div>
+  </div>
+
+  <div class="cover-result">
+    {% set counts = report.severity_counts %}
+    <div class="cover-result-label">FINDINGS SUMMARY</div>
+    <div class="cover-result-total">{{ report.total_vulnerabilities }} Vulnerabilities Identified</div>
+    <div class="cover-result-breakdown">
+      {% if counts.critical %}<span class="cover-sev cover-sev-critical">{{ counts.critical }} Critical</span>{% endif %}
+      {% if counts.high %}<span class="cover-sev cover-sev-high">{{ counts.high }} High</span>{% endif %}
+      {% if counts.medium %}<span class="cover-sev cover-sev-medium">{{ counts.medium }} Medium</span>{% endif %}
+      {% if counts.low %}<span class="cover-sev cover-sev-low">{{ counts.low }} Low</span>{% endif %}
+      {% if counts.info %}<span class="cover-sev cover-sev-info">{{ counts.info }} Info</span>{% endif %}
+      {% if report.total_vulnerabilities == 0 %}<span class="cover-sev" style="color:#94a3b8;">No vulnerabilities identified</span>{% endif %}
+    </div>
+  </div>
+
+  <div class="cover-divider"></div>
+</div>

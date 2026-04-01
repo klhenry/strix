@@ -1,0 +1,389 @@
+{% extends "base.html" %}
+{% block title %}{{ run_name }}{% endblock %}
+
+{% block content %}
+<div class="detail-header">
+    <div>
+        <a href="/" style="color: var(--brand-text-dim); font-size: 0.8rem;">&larr; Dashboard</a>
+        <h1 style="margin-top: 0.25rem;">{{ run_name }}</h1>
+    </div>
+    <div style="display: flex; gap: 0.75rem; align-items: center;">
+        {% if detail %}
+            <span class="badge badge-{{ 'running' if is_paused else detail.summary.status }}" id="status-badge">
+                {{ 'paused' if is_paused else detail.summary.status }}
+            </span>
+        {% endif %}
+
+        {% if is_live %}
+        <div class="scan-controls" id="scan-controls">
+            <!-- Pause / Resume -->
+            {% if is_paused %}
+                <button class="btn btn-primary btn-sm" id="btn-resume" onclick="resumeScan()">
+                    &#9654; Resume
+                </button>
+            {% else %}
+                <button class="btn btn-outline btn-sm" id="btn-pause" onclick="pauseScan()">
+                    &#9646;&#9646; Pause
+                </button>
+            {% endif %}
+
+            <!-- Stop -->
+            <form action="/api/scans/{{ run_name }}/stop" method="post" style="display:inline;"
+                  onsubmit="return confirm('Stop this scan? This cannot be undone.')">
+                <button type="submit" class="btn btn-danger btn-sm">&#9632; Stop</button>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{% if detail is none %}
+<div class="card empty-state" id="waiting-card">
+    <h3>Scan starting...</h3>
+    <p>Waiting for events. This page will update automatically.</p>
+    <div id="startup-error" style="display:none; margin-top: 1rem; padding: 1rem; background: rgba(239,68,68,0.1); border: 1px solid var(--color-critical); border-radius: 6px; text-align: left;">
+        <strong style="color: var(--color-critical);">Scan failed to start</strong>
+        <p id="startup-error-msg" style="margin-top: 0.5rem; font-size: 0.85rem; color: var(--brand-text-dim);"></p>
+    </div>
+</div>
+<script>
+// Poll for scan status while waiting for events to appear
+(function() {
+    var checks = 0;
+    var interval = setInterval(function() {
+        checks++;
+        fetch('/api/scans/{{ run_name }}')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.status === 'completed' || data.status === 'error') {
+                    clearInterval(interval);
+                    location.reload();
+                }
+            })
+            .catch(function() {});
+        // Also check if the scan task died (no longer active)
+        if (checks > 6) {
+            fetch('/api/scans/{{ run_name }}')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.error === 'not found') {
+                        clearInterval(interval);
+                        var el = document.getElementById('startup-error');
+                        var msg = document.getElementById('startup-error-msg');
+                        if (el && msg) {
+                            el.style.display = 'block';
+                            msg.textContent = 'The scan failed before producing any events. Check that STRIX_LLM and LLM_API_KEY environment variables are set when starting the web server. Example: STRIX_LLM="openai/gpt-4o" LLM_API_KEY="sk-..." .venv/bin/strix-web';
+                        }
+                    }
+                });
+        }
+    }, 2000);
+})();
+</script>
+{% else %}
+
+<!-- Stats Row -->
+<div class="stats-row">
+    <div class="stat-card">
+        <div class="stat-value" id="vuln-count">{{ detail.summary.vulnerability_count }}</div>
+        <div class="stat-label">Vulnerabilities</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value sev-critical" id="crit-count">{{ detail.summary.severity_counts.get('critical', 0) }}</div>
+        <div class="stat-label">Critical</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value sev-high" id="high-count">{{ detail.summary.severity_counts.get('high', 0) }}</div>
+        <div class="stat-label">High</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value sev-medium" id="med-count">{{ detail.summary.severity_counts.get('medium', 0) }}</div>
+        <div class="stat-label">Medium</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ detail.summary.duration_display }}</div>
+        <div class="stat-label">Duration</div>
+    </div>
+</div>
+
+<!-- Comment Box (live scans only) -->
+{% if is_live %}
+<div class="card" id="comment-card">
+    <h2>Send Instruction</h2>
+    <p style="font-size: 0.8rem; color: var(--brand-text-dim); margin-bottom: 0.75rem;">
+        Send a message to the agent during the scan — redirect focus, ask it to check something specific, or change approach.
+    </p>
+    <form class="comment-form" onsubmit="sendComment(event)">
+        <div style="display: flex; gap: 0.75rem;">
+            <input type="text" id="comment-input"
+                   placeholder="e.g. Focus on authentication endpoints, check for IDOR..."
+                   style="flex: 1; background: var(--brand-darker); border: 1px solid var(--brand-border);
+                          border-radius: 6px; padding: 0.625rem 0.75rem; color: var(--brand-text);
+                          font-size: 0.875rem;">
+            <button type="submit" class="btn btn-primary btn-sm">Send</button>
+        </div>
+    </form>
+    <div id="comment-history" style="margin-top: 0.75rem;"></div>
+</div>
+{% endif %}
+
+<!-- Reports (if completed) -->
+{% if detail.summary.available_reports %}
+<div class="card">
+    <h2>Reports</h2>
+    <div class="report-links">
+        {% for fmt in detail.summary.available_reports %}
+            <a href="/scans/{{ run_name }}/reports/{{ fmt }}" class="report-link" target="_blank">
+                Download {{ fmt|upper }}
+            </a>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Findings -->
+<div class="card">
+    <h2>Findings</h2>
+    <div id="findings-container">
+        {% if detail.vulnerabilities %}
+            {% for vuln in detail.vulnerabilities %}
+            <div class="finding-card {{ vuln.severity|lower }}">
+                <div class="finding-header">
+                    <span class="badge badge-{{ 'error' if vuln.severity|lower == 'critical' else ('running' if vuln.severity|lower == 'high' else 'completed') }}">
+                        {{ vuln.severity|upper }}
+                    </span>
+                    <span class="finding-title">{{ vuln.title }}</span>
+                    {% if vuln.cvss %}
+                        <span class="sev" style="margin-left: auto;">CVSS {{ vuln.cvss }}</span>
+                    {% endif %}
+                </div>
+                <div class="finding-meta">
+                    {% if vuln.target %}{{ vuln.target }}{% endif %}
+                    {% if vuln.endpoint %} &middot; {{ vuln.method|default('GET') }} {{ vuln.endpoint }}{% endif %}
+                    {% if vuln.cwe %} &middot; {{ vuln.cwe }}{% endif %}
+                </div>
+                {% if vuln.description %}
+                    <div class="finding-desc">{{ vuln.description }}</div>
+                {% endif %}
+                {% if vuln.remediation_steps %}
+                    <details style="margin-top: 0.75rem;">
+                        <summary style="color: var(--brand-accent); font-size: 0.8rem; cursor: pointer;">Remediation</summary>
+                        <div class="finding-desc" style="margin-top: 0.5rem; padding-left: 1rem; border-left: 2px solid var(--brand-border);">
+                            {{ vuln.remediation_steps }}
+                        </div>
+                    </details>
+                {% endif %}
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="empty-state" id="no-findings">
+                <p>{% if is_live %}Scanning... findings will appear here as they are discovered.{% else %}No vulnerabilities found.{% endif %}</p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Activity Log -->
+<div class="card">
+    <h2>Activity Log</h2>
+    <div class="activity-log" id="activity-log">
+        {% for evt in detail.events[-50:] %}
+        <div class="event-row">
+            <span class="event-time">{{ evt.timestamp[:19] }}</span>
+            <span class="event-type">{{ evt.event_type }}</span>
+            <span class="event-detail">
+                {% if evt.actor %}
+                    {{ evt.actor.get('agent_name', evt.actor.get('tool_name', '')) }}
+                {% endif %}
+                {% if evt.status %} [{{ evt.status }}]{% endif %}
+            </span>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if is_live %}
+<script>
+(function() {
+    const runName = '{{ run_name }}';
+    const evtSource = new EventSource('/api/scans/' + runName + '/events/stream');
+    const log = document.getElementById('activity-log');
+    const findingsContainer = document.getElementById('findings-container');
+    let vulnCount = {{ detail.summary.vulnerability_count if detail else 0 }};
+    let critCount = {{ detail.summary.severity_counts.get('critical', 0) if detail else 0 }};
+    let highCount = {{ detail.summary.severity_counts.get('high', 0) if detail else 0 }};
+    let medCount = {{ detail.summary.severity_counts.get('medium', 0) if detail else 0 }};
+
+    function addEventRow(evt) {
+        if (!log) return;
+        const row = document.createElement('div');
+        row.className = 'event-row';
+        const actor = evt.actor || {};
+        const name = actor.agent_name || actor.tool_name || '';
+        row.innerHTML =
+            '<span class="event-time">' + (evt.timestamp || '').slice(0, 19) + '</span>' +
+            '<span class="event-type">' + evt.event_type + '</span>' +
+            '<span class="event-detail">' + name + (evt.status ? ' [' + evt.status + ']' : '') + '</span>';
+        log.appendChild(row);
+        log.scrollTop = log.scrollHeight;
+    }
+
+    function addFindingCard(vuln) {
+        var noFindings = document.getElementById('no-findings');
+        if (noFindings) noFindings.remove();
+
+        var sev = (vuln.severity || 'info').toLowerCase();
+        var badgeClass = sev === 'critical' ? 'error' : (sev === 'high' ? 'running' : 'completed');
+        var card = document.createElement('div');
+        card.className = 'finding-card ' + sev;
+        card.innerHTML =
+            '<div class="finding-header">' +
+                '<span class="badge badge-' + badgeClass + '">' + (vuln.severity || '').toUpperCase() + '</span>' +
+                '<span class="finding-title">' + (vuln.title || '') + '</span>' +
+                (vuln.cvss ? '<span class="sev" style="margin-left:auto;">CVSS ' + vuln.cvss + '</span>' : '') +
+            '</div>' +
+            '<div class="finding-meta">' +
+                (vuln.target || '') +
+                (vuln.endpoint ? ' &middot; ' + (vuln.method || 'GET') + ' ' + vuln.endpoint : '') +
+                (vuln.cwe ? ' &middot; ' + vuln.cwe : '') +
+            '</div>' +
+            (vuln.description ? '<div class="finding-desc">' + vuln.description + '</div>' : '');
+        findingsContainer.appendChild(card);
+    }
+
+    function updateCounts() {
+        var vc = document.getElementById('vuln-count');
+        var cc = document.getElementById('crit-count');
+        var hc = document.getElementById('high-count');
+        var mc = document.getElementById('med-count');
+        if (vc) vc.textContent = vulnCount;
+        if (cc) cc.textContent = critCount;
+        if (hc) hc.textContent = highCount;
+        if (mc) mc.textContent = medCount;
+    }
+
+    evtSource.addEventListener('finding.created', function(e) {
+        try {
+            var data = JSON.parse(e.data);
+            var report = (data.payload || {}).report;
+            if (report) {
+                addFindingCard(report);
+                vulnCount++;
+                var sev = (report.severity || '').toLowerCase();
+                if (sev === 'critical') critCount++;
+                else if (sev === 'high') highCount++;
+                else if (sev === 'medium') medCount++;
+                updateCounts();
+            }
+            addEventRow(data);
+        } catch(err) {}
+    });
+
+    var eventTypes = [
+        'run.started', 'run.configured', 'agent.created',
+        'tool.execution.started', 'tool.execution.updated',
+        'agent.status.updated', 'chat.message', 'finding.reviewed',
+        'scan.paused', 'scan.resumed', 'user.comment', 'run.error'
+    ];
+    eventTypes.forEach(function(type) {
+        evtSource.addEventListener(type, function(e) {
+            try { addEventRow(JSON.parse(e.data)); } catch(err) {}
+        });
+    });
+
+    evtSource.addEventListener('run.completed', function(e) {
+        try { addEventRow(JSON.parse(e.data)); } catch(err) {}
+        evtSource.close();
+        setTimeout(function() { location.reload(); }, 1500);
+    });
+
+    evtSource.addEventListener('done', function() { evtSource.close(); });
+
+    evtSource.onerror = function() {
+        setTimeout(function() {
+            fetch('/api/scans/' + runName)
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.status === 'completed') {
+                        evtSource.close();
+                        location.reload();
+                    }
+                })
+                .catch(function() {});
+        }, 2000);
+    };
+
+    // Expose controls globally
+    window.pauseScan = function() {
+        fetch('/api/scans/' + runName + '/pause', { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.success) {
+                    var badge = document.getElementById('status-badge');
+                    if (badge) { badge.textContent = 'paused'; badge.className = 'badge badge-running'; }
+                    var controls = document.getElementById('scan-controls');
+                    if (controls) {
+                        var pauseBtn = document.getElementById('btn-pause');
+                        if (pauseBtn) {
+                            pauseBtn.id = 'btn-resume';
+                            pauseBtn.className = 'btn btn-primary btn-sm';
+                            pauseBtn.innerHTML = '&#9654; Resume';
+                            pauseBtn.onclick = window.resumeScan;
+                        }
+                    }
+                    addEventRow({timestamp: new Date().toISOString(), event_type: 'scan.paused', status: 'paused'});
+                }
+            });
+    };
+
+    window.resumeScan = function() {
+        fetch('/api/scans/' + runName + '/resume', { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.success) {
+                    var badge = document.getElementById('status-badge');
+                    if (badge) { badge.textContent = 'running'; badge.className = 'badge badge-running'; }
+                    var resumeBtn = document.getElementById('btn-resume');
+                    if (resumeBtn) {
+                        resumeBtn.id = 'btn-pause';
+                        resumeBtn.className = 'btn btn-outline btn-sm';
+                        resumeBtn.innerHTML = '&#9646;&#9646; Pause';
+                        resumeBtn.onclick = window.pauseScan;
+                    }
+                    addEventRow({timestamp: new Date().toISOString(), event_type: 'scan.resumed', status: 'running'});
+                }
+            });
+    };
+
+    window.sendComment = function(e) {
+        e.preventDefault();
+        var input = document.getElementById('comment-input');
+        var text = input.value.trim();
+        if (!text) return;
+
+        fetch('/api/scans/' + runName + '/comment', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: 'comment=' + encodeURIComponent(text)
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                input.value = '';
+                var history = document.getElementById('comment-history');
+                var entry = document.createElement('div');
+                entry.style.cssText = 'padding: 0.4rem 0.75rem; margin-bottom: 0.4rem; background: rgba(16,185,129,0.08); border-left: 3px solid var(--brand-accent); border-radius: 4px; font-size: 0.8rem;';
+                entry.innerHTML = '<span style="color: var(--brand-accent); font-weight: 600;">You:</span> ' + text;
+                history.appendChild(entry);
+                addEventRow({timestamp: new Date().toISOString(), event_type: 'user.comment', status: 'delivered', actor: {agent_name: 'You'}});
+            }
+        });
+    };
+})();
+</script>
+{% endif %}
+{% endblock %}
