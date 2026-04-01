@@ -13,6 +13,10 @@ RUN pip install --no-cache-dir poetry
 # Copy dependency files first for layer caching
 COPY pyproject.toml poetry.lock* ./
 
+# Regenerate lock if out of sync, then install deps
+RUN poetry config virtualenvs.create false \
+    && poetry lock --no-update 2>/dev/null; \
+    poetry install --no-interaction --no-ansi --extras web --without dev
 # Install dependencies (no dev deps, web extra only)
 RUN poetry config virtualenvs.create false \
     && poetry install --no-interaction --no-ansi --extras web --without dev
