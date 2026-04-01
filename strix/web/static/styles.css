@@ -1,0 +1,393 @@
+/* Strix Web Dashboard — Accountable HQ Branding */
+
+:root {
+    --brand-dark: #1e293b;
+    --brand-darker: #0f172a;
+    --brand-card: #1e293b;
+    --brand-border: #334155;
+    --brand-accent: #10b981;
+    --brand-accent-hover: #059669;
+    --brand-text: #e2e8f0;
+    --brand-text-dim: #94a3b8;
+    --brand-text-muted: #64748b;
+    --color-critical: #ef4444;
+    --color-high: #f97316;
+    --color-medium: #eab308;
+    --color-low: #3b82f6;
+    --color-info: #6b7280;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--brand-darker);
+    color: var(--brand-text);
+    min-height: 100vh;
+}
+
+a { color: var(--brand-accent); text-decoration: none; }
+a:hover { color: var(--brand-accent-hover); }
+
+/* ── Layout ─────────────────────────────────────────── */
+
+.top-bar {
+    background: var(--brand-dark);
+    border-bottom: 1px solid var(--brand-border);
+    padding: 0.75rem 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.top-bar .logo {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.top-bar .logo svg { width: 28px; height: 28px; }
+.top-bar nav a {
+    margin-left: 1.5rem;
+    color: var(--brand-text-dim);
+    font-size: 0.875rem;
+}
+.top-bar nav a:hover { color: #fff; }
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem;
+}
+
+/* ── Cards ──────────────────────────────────────────── */
+
+.card {
+    background: var(--brand-dark);
+    border: 1px solid var(--brand-border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+.card h2 {
+    font-size: 1.125rem;
+    margin-bottom: 1rem;
+    color: #fff;
+}
+
+/* ── New Scan Form ──────────────────────────────────── */
+
+.scan-form {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 0.75rem;
+    align-items: end;
+}
+.scan-form .field { display: flex; flex-direction: column; gap: 0.25rem; }
+.scan-form label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--brand-text-dim);
+}
+.scan-form input,
+.scan-form select,
+.scan-form textarea {
+    background: var(--brand-darker);
+    border: 1px solid var(--brand-border);
+    border-radius: 6px;
+    padding: 0.625rem 0.75rem;
+    color: var(--brand-text);
+    font-size: 0.875rem;
+}
+.scan-form input:focus,
+.scan-form select:focus,
+.scan-form textarea:focus {
+    outline: none;
+    border-color: var(--brand-accent);
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.15);
+}
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1.25rem;
+    border-radius: 6px;
+    border: none;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.btn-primary {
+    background: var(--brand-accent);
+    color: #fff;
+}
+.btn-primary:hover { background: var(--brand-accent-hover); }
+.btn-danger {
+    background: var(--color-critical);
+    color: #fff;
+}
+.btn-danger:hover { background: #dc2626; }
+.btn-outline {
+    background: transparent;
+    border: 1px solid var(--brand-border);
+    color: var(--brand-text-dim);
+}
+.btn-outline:hover {
+    border-color: var(--brand-accent);
+    color: var(--brand-accent);
+}
+
+/* ── Scan History Table ─────────────────────────────── */
+
+.scan-table { width: 100%; border-collapse: collapse; }
+.scan-table th {
+    text-align: left;
+    padding: 0.75rem;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--brand-text-muted);
+    border-bottom: 1px solid var(--brand-border);
+}
+.scan-table td {
+    padding: 0.75rem;
+    border-bottom: 1px solid rgba(51, 65, 85, 0.5);
+    font-size: 0.875rem;
+}
+.scan-table tr:hover td {
+    background: rgba(16, 185, 129, 0.03);
+}
+.scan-table .run-name {
+    font-weight: 600;
+    color: var(--brand-accent);
+}
+
+/* ── Status Badges ──────────────────────────────────── */
+
+.badge {
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    border-radius: 9999px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+.badge-running {
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--brand-accent);
+    animation: pulse-badge 2s infinite;
+}
+.badge-completed {
+    background: rgba(59, 130, 246, 0.15);
+    color: #60a5fa;
+}
+.badge-error {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--color-critical);
+}
+
+@keyframes pulse-badge {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+/* ── Severity Badges ────────────────────────────────── */
+
+.sev { font-weight: 700; font-size: 0.75rem; }
+.sev-critical { color: var(--color-critical); }
+.sev-high { color: var(--color-high); }
+.sev-medium { color: var(--color-medium); }
+.sev-low { color: var(--color-low); }
+.sev-info { color: var(--color-info); }
+
+.severity-pills { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.severity-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+.severity-pill.critical { background: rgba(239, 68, 68, 0.15); color: var(--color-critical); }
+.severity-pill.high { background: rgba(249, 115, 22, 0.15); color: var(--color-high); }
+.severity-pill.medium { background: rgba(234, 179, 8, 0.15); color: var(--color-medium); }
+.severity-pill.low { background: rgba(59, 130, 246, 0.15); color: var(--color-low); }
+
+/* ── Scan Controls ──────────────────────────────────── */
+
+.scan-controls {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+.btn-sm {
+    padding: 0.4rem 0.85rem;
+    font-size: 0.8rem;
+}
+.badge-paused {
+    background: rgba(234, 179, 8, 0.15);
+    color: var(--color-medium);
+}
+
+/* ── Scan Detail ────────────────────────────────────── */
+
+.detail-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.5rem;
+}
+.detail-header h1 { font-size: 1.5rem; color: #fff; }
+
+.stats-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+.stat-card {
+    background: var(--brand-dark);
+    border: 1px solid var(--brand-border);
+    border-radius: 8px;
+    padding: 1rem;
+    text-align: center;
+}
+.stat-card .stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #fff;
+}
+.stat-card .stat-label {
+    font-size: 0.75rem;
+    color: var(--brand-text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-top: 0.25rem;
+}
+
+/* ── Finding Cards ──────────────────────────────────── */
+
+.finding-card {
+    background: var(--brand-dark);
+    border: 1px solid var(--brand-border);
+    border-radius: 8px;
+    padding: 1.25rem;
+    margin-bottom: 1rem;
+    border-left: 4px solid var(--brand-border);
+}
+.finding-card.critical { border-left-color: var(--color-critical); }
+.finding-card.high { border-left-color: var(--color-high); }
+.finding-card.medium { border-left-color: var(--color-medium); }
+.finding-card.low { border-left-color: var(--color-low); }
+
+.finding-card .finding-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+.finding-card .finding-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #fff;
+}
+.finding-card .finding-meta {
+    font-size: 0.8rem;
+    color: var(--brand-text-dim);
+    margin-bottom: 0.5rem;
+}
+.finding-card .finding-desc {
+    font-size: 0.875rem;
+    color: var(--brand-text);
+    line-height: 1.5;
+}
+
+/* ── Activity Log ───────────────────────────────────── */
+
+.activity-log {
+    max-height: 400px;
+    overflow-y: auto;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.8rem;
+    line-height: 1.6;
+}
+.activity-log .event-row {
+    padding: 0.35rem 0;
+    border-bottom: 1px solid rgba(51, 65, 85, 0.3);
+    display: grid;
+    grid-template-columns: 150px 180px 1fr;
+    gap: 0.75rem;
+}
+.activity-log .event-time { color: var(--brand-text-muted); }
+.activity-log .event-type { color: var(--brand-accent); font-weight: 600; }
+.activity-log .event-detail { color: var(--brand-text-dim); }
+
+/* ── Report Download Buttons ────────────────────────── */
+
+.report-links { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+.report-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.5rem 1rem;
+    background: var(--brand-dark);
+    border: 1px solid var(--brand-border);
+    border-radius: 6px;
+    color: var(--brand-text);
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    transition: all 0.15s;
+}
+.report-link:hover {
+    border-color: var(--brand-accent);
+    color: var(--brand-accent);
+}
+
+/* ── Instruction Accordion ──────────────────────────── */
+
+.advanced-toggle {
+    font-size: 0.8rem;
+    color: var(--brand-text-dim);
+    cursor: pointer;
+    margin-top: 0.5rem;
+}
+.advanced-panel { margin-top: 0.75rem; }
+.advanced-panel textarea {
+    width: 100%;
+    min-height: 60px;
+    background: var(--brand-darker);
+    border: 1px solid var(--brand-border);
+    border-radius: 6px;
+    padding: 0.625rem 0.75rem;
+    color: var(--brand-text);
+    font-size: 0.875rem;
+    resize: vertical;
+}
+
+/* ── Empty State ────────────────────────────────────── */
+
+.empty-state {
+    text-align: center;
+    padding: 3rem;
+    color: var(--brand-text-muted);
+}
+.empty-state h3 { font-size: 1.25rem; color: var(--brand-text-dim); margin-bottom: 0.5rem; }
+.empty-state p { font-size: 0.875rem; }
+
+/* ── Responsive ─────────────────────────────────────── */
+
+@media (max-width: 768px) {
+    .scan-form { grid-template-columns: 1fr; }
+    .stats-row { grid-template-columns: 1fr 1fr; }
+    .activity-log .event-row { grid-template-columns: 1fr; }
+    .container { padding: 1rem; }
+}

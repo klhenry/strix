@@ -1,0 +1,30 @@
+<div class="page-header">
+  {% if logo_b64 %}<img class="header-logo-img" src="data:image/png;base64,{{ logo_b64 }}" alt="Accountable">{% else %}<span class="page-header-logo">Accountable</span>{% endif %}
+  <span class="page-header-center">{{ report.metadata.report_title | upper }} &nbsp;|&nbsp; CONFIDENTIAL</span>
+  <span class="page-header-right">{% if client_name %}{{ client_name }} &nbsp;|&nbsp; {% endif %}{{ generated_at[:10] if generated_at|length > 10 else generated_at }}</span>
+</div>
+
+<div class="page-content">
+  <h1 class="section-heading">Table of Contents</h1>
+
+  <nav class="toc">
+    <ol>
+      <li><span class="toc-number">1.</span> <a href="#executive-summary">Executive Summary</a></li>
+      <li><span class="toc-number">2.</span> <a href="#scope-methodology">Scope &amp; Methodology</a></li>
+      <li><span class="toc-number">3.</span> <a href="#summary-findings">Summary of Findings</a></li>
+      {% if report.vulnerabilities %}
+      <li><span class="toc-number">4.</span> <a href="#detailed-findings">Detailed Findings</a>
+        <ol>
+          {% for vuln in report.vulnerabilities %}
+          <li>4.{{ loop.index }} <a href="#{{ vuln.id }}">{{ vuln.title }} ({{ vuln.severity | capitalize }})</a></li>
+          {% endfor %}
+        </ol>
+      </li>
+      {% endif %}
+      <li><span class="toc-number">5.</span> <a href="#remediation-roadmap">Remediation Roadmap</a></li>
+      {% if report.methodology %}<li><span class="toc-number">6.</span> <a href="#testing-tools">Testing Tools &amp; Techniques</a></li>{% endif %}
+      <li><span class="toc-number">7.</span> <a href="#cvss-appendix">Appendix: CVSS Severity Scale</a></li>
+      <li><span class="toc-number">8.</span> <a href="#disclaimer">Disclaimer &amp; Confidentiality</a></li>
+    </ol>
+  </nav>
+</div>

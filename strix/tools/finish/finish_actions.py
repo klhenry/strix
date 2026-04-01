@@ -1,6 +1,13 @@
+import logging
 from typing import Any
 
 from strix.tools.registry import register_tool
+
+logger = logging.getLogger(__name__)
+
+# Track how many times finish_scan has been called with active agents, per scan
+_finish_scan_attempts: dict[str, int] = {}
+_MAX_ATTEMPTS_BEFORE_FORCE: int = 3
 
 
 def _validate_root_agent(agent_state: Any) -> dict[str, Any] | None:
@@ -16,7 +23,10 @@ def _validate_root_agent(agent_state: Any) -> dict[str, Any] | None:
 
 def _check_active_agents(agent_state: Any = None) -> dict[str, Any] | None:
     try:
-        from strix.tools.agents_graph.agents_graph_actions import _agent_graph
+        from strix.tools.agents_graph.agents_graph_actions import (
+            _agent_graph,
+            force_stop_all_subagents,
+        )
 
         if agent_state and agent_state.agent_id:
             current_agent_id = agent_state.agent_id
@@ -51,10 +61,28 @@ def _check_active_agents(agent_state: Any = None) -> dict[str, Any] | None:
                 )
 
         if active_agents or stopping_agents:
+            _finish_scan_attempts[current_agent_id] = _finish_scan_attempts.get(current_agent_id, 0) + 1
+            attempts = _finish_scan_attempts[current_agent_id]
+
+            # After N failed attempts, force-stop all sub-agents
+            if attempts >= _MAX_ATTEMPTS_BEFORE_FORCE:
+                total_stuck = len(active_agents) + len(stopping_agents)
+                stopped_ids = force_stop_all_subagents(current_agent_id)
+                logger.warning(
+                    "Force-stopped %d stuck sub-agents after %d finish_scan attempts",
+                    len(stopped_ids),
+                    attempts,
+                )
+                _finish_scan_attempts.pop(current_agent_id, None)
+                # Allow finish_scan to proceed
+                return None
+
             response: dict[str, Any] = {
                 "success": False,
                 "error": "agents_still_active",
-                "message": "Cannot finish scan: agents are still active",
+                "message": f"Cannot finish scan: agents are still active "
+                f"(attempt {attempts}/{_MAX_ATTEMPTS_BEFORE_FORCE}, "
+                f"will force-stop on attempt {_MAX_ATTEMPTS_BEFORE_FORCE})",
             }
 
             if active_agents:
@@ -66,7 +94,8 @@ def _check_active_agents(agent_state: Any = None) -> dict[str, Any] | None:
             response["suggestions"] = [
                 "Use wait_for_message to wait for all agents to complete",
                 "Use send_message_to_agent if you need agents to complete immediately",
-                "Check agent_status to see current agent states",
+                f"Or call finish_scan again — after {_MAX_ATTEMPTS_BEFORE_FORCE} "
+                f"attempts, stuck agents will be force-stopped automatically",
             ]
 
             response["total_active"] = len(active_agents) + len(stopping_agents)
@@ -76,8 +105,6 @@ def _check_active_agents(agent_state: Any = None) -> dict[str, Any] | None:
     except ImportError:
         pass
     except Exception:
-        import logging
-
         logging.exception("Error checking active agents")
 
     return None
@@ -133,8 +160,6 @@ def finish_scan(
                 "message": "Scan completed successfully",
                 "vulnerabilities_found": vulnerability_count,
             }
-
-        import logging
 
         logging.warning("Current tracer not available - scan results not stored")
 

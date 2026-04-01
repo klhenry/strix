@@ -1,0 +1,523 @@
+/* ==========================================================================
+   Accountable HQ — Penetration Test Report
+   Design based on professional pentest report template
+   ========================================================================== */
+
+:root {
+    /* Accountable brand */
+    --brand-primary: #2a7d6a;       /* Accountable teal/green */
+    --brand-dark: #1a2332;          /* Dark navy (page backgrounds, header) */
+    --brand-navy: #1e293b;          /* Slightly lighter navy */
+    --brand-accent: #4ecba5;        /* Bright teal accent */
+
+    /* Severity palette */
+    --color-critical: #991b1b;
+    --color-high: #c2410c;
+    --color-medium: #b45309;
+    --color-low: #15803d;
+    --color-info: #0369a1;
+
+    /* Neutrals */
+    --color-bg: #ffffff;
+    --color-text: #1e293b;
+    --color-text-light: #64748b;
+    --color-text-muted: #94a3b8;
+    --color-border: #e2e8f0;
+    --color-row-alt: #f8fafc;
+    --color-callout-bg: #f0fdf8;
+    --color-callout-border: #2a7d6a;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                 'Helvetica Neue', Arial, sans-serif;
+    color: var(--color-text);
+    background: var(--color-bg);
+    line-height: 1.65;
+    font-size: 14px;
+    margin: 0;
+    padding: 0;
+}
+
+/* ==========================================================================
+   Cover Page
+   ========================================================================== */
+
+.cover-page {
+    background: var(--brand-dark);
+    color: white;
+    min-height: 100vh;
+    padding: 80px 72px 60px;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+}
+
+.cover-logo {
+    font-size: 2rem;
+    font-weight: 800;
+    color: var(--brand-accent);
+    letter-spacing: -0.02em;
+    margin-bottom: 60px;
+}
+
+.cover-logo-img {
+    width: 220px;
+    height: auto;
+    margin-bottom: 60px;
+    filter: brightness(0) invert(1);
+}
+
+.header-logo-img {
+    width: 120px;
+    height: auto;
+    filter: brightness(0) invert(1);
+}
+
+.cover-title {
+    font-size: 2.75rem;
+    font-weight: 800;
+    color: white;
+    line-height: 1.15;
+    margin-bottom: 8px;
+}
+
+.cover-client {
+    font-size: 1.5rem;
+    color: var(--brand-accent);
+    font-weight: 500;
+    margin-bottom: 40px;
+}
+
+.cover-meta {
+    font-size: 0.9rem;
+    color: #94a3b8;
+    line-height: 2;
+}
+.cover-meta strong {
+    color: #cbd5e1;
+}
+
+.cover-result {
+    margin-top: auto;
+    text-align: center;
+    padding-top: 40px;
+}
+.cover-result-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: var(--color-text-muted);
+    margin-bottom: 12px;
+}
+.cover-result-total {
+    font-size: 1.75rem;
+    font-weight: 800;
+    color: white;
+    margin-bottom: 16px;
+}
+.cover-result-breakdown {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+.cover-sev {
+    font-size: 0.85rem;
+    font-weight: 600;
+    padding: 4px 14px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.08);
+}
+.cover-sev-critical { color: #fca5a5; }
+.cover-sev-high { color: #fdba74; }
+.cover-sev-medium { color: #fcd34d; }
+.cover-sev-low { color: #86efac; }
+.cover-sev-info { color: #7dd3fc; }
+
+.cover-divider {
+    position: absolute;
+    bottom: 48px;
+    left: 72px;
+    right: 72px;
+    height: 3px;
+    background: var(--brand-accent);
+}
+
+/* ==========================================================================
+   Page Header (every page after cover)
+   ========================================================================== */
+
+.page-header {
+    background: var(--brand-dark);
+    color: white;
+    padding: 14px 48px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    margin-bottom: 40px;
+}
+.page-header-logo {
+    font-weight: 800;
+    font-size: 1.1rem;
+    color: var(--brand-accent);
+}
+.page-header-center {
+    text-transform: uppercase;
+    color: #94a3b8;
+}
+.page-header-right {
+    color: #94a3b8;
+}
+
+/* ==========================================================================
+   Content Area
+   ========================================================================== */
+
+.page-content {
+    max-width: 820px;
+    margin: 0 auto;
+    padding: 0 48px 60px;
+}
+
+/* ==========================================================================
+   Section Headings
+   ========================================================================== */
+
+.section-heading {
+    font-size: 2rem;
+    font-weight: 800;
+    color: var(--brand-dark);
+    margin-bottom: 12px;
+    line-height: 1.2;
+}
+
+.section-divider {
+    height: 2px;
+    background: linear-gradient(to right, var(--brand-primary), transparent);
+    margin-bottom: 28px;
+}
+
+.sub-heading {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--brand-dark);
+    margin-top: 32px;
+    margin-bottom: 12px;
+}
+
+/* ==========================================================================
+   Tables (Milo-style)
+   ========================================================================== */
+
+.report-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0 24px;
+    font-size: 0.875rem;
+}
+
+.report-table thead th {
+    background: var(--brand-dark);
+    color: white;
+    font-weight: 600;
+    text-align: left;
+    padding: 10px 14px;
+    font-size: 0.8rem;
+}
+
+.report-table thead th:first-child {
+    border-radius: 4px 0 0 0;
+}
+.report-table thead th:last-child {
+    border-radius: 0 4px 0 0;
+}
+
+.report-table tbody td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--color-border);
+    vertical-align: top;
+}
+
+.report-table tbody tr:nth-child(even) {
+    background: var(--color-row-alt);
+}
+
+.report-table tbody tr:hover {
+    background: #f1f5f9;
+}
+
+/* ==========================================================================
+   Severity Badges
+   ========================================================================== */
+
+.severity-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: capitalize;
+}
+.severity-critical { color: var(--color-critical); }
+.severity-high { color: var(--color-high); }
+.severity-medium { color: var(--color-medium); }
+.severity-low { color: var(--color-low); }
+.severity-info { color: var(--color-info); }
+
+/* ==========================================================================
+   Callout Box ("What This Means")
+   ========================================================================== */
+
+.callout {
+    background: var(--color-callout-bg);
+    border-left: 4px solid var(--color-callout-border);
+    padding: 16px 20px;
+    margin: 16px 0 24px;
+    border-radius: 0 6px 6px 0;
+    font-size: 0.875rem;
+    line-height: 1.7;
+}
+.callout strong {
+    color: var(--brand-primary);
+}
+
+/* ==========================================================================
+   Finding Detail Cards
+   ========================================================================== */
+
+.finding-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 0;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.finding-header-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 20px;
+}
+.finding-header-table td {
+    padding: 6px 14px;
+    font-size: 0.875rem;
+    border: 1px solid var(--color-border);
+}
+.finding-header-table td:first-child {
+    font-weight: 600;
+    color: var(--color-text-light);
+    width: 120px;
+    background: var(--color-row-alt);
+}
+
+.finding-section-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--brand-dark);
+    margin-top: 24px;
+    margin-bottom: 8px;
+}
+
+.finding-text {
+    font-size: 0.875rem;
+    line-height: 1.7;
+    margin-bottom: 16px;
+    white-space: pre-wrap;
+}
+
+/* ==========================================================================
+   Code & Evidence
+   ========================================================================== */
+
+pre {
+    background: #f8fafc;
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    padding: 12px 16px;
+    overflow-x: auto;
+    font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    margin: 8px 0 16px;
+}
+
+code { font-family: inherit; }
+
+.diff-line-add { color: #166534; background: #dcfce7; display: block; }
+.diff-line-remove { color: #991b1b; background: #fee2e2; display: block; }
+
+.evidence-img {
+    max-width: 100%;
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    margin: 8px 0;
+}
+
+/* ==========================================================================
+   Table of Contents
+   ========================================================================== */
+
+.toc {
+    padding: 0;
+}
+.toc ol {
+    list-style: none;
+    padding: 0;
+    counter-reset: toc-counter;
+}
+.toc > ol > li {
+    margin-bottom: 6px;
+    font-size: 1rem;
+}
+.toc ol ol {
+    padding-left: 28px;
+    margin-top: 4px;
+}
+.toc ol ol li {
+    font-size: 0.9rem;
+    color: var(--color-text-light);
+    margin-bottom: 3px;
+}
+.toc a {
+    color: var(--color-text);
+    text-decoration: none;
+    font-weight: 500;
+}
+.toc a:hover {
+    color: var(--brand-primary);
+}
+.toc .toc-number {
+    color: var(--brand-primary);
+    font-weight: 700;
+    margin-right: 6px;
+}
+
+/* ==========================================================================
+   Findings Overview (Executive Summary table)
+   ========================================================================== */
+
+.findings-overview {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+}
+.findings-overview th {
+    text-align: left;
+    padding: 8px 0;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--color-text-light);
+    border-bottom: 2px solid var(--color-border);
+}
+.findings-overview td {
+    padding: 8px 0;
+    font-size: 0.9rem;
+    border-bottom: 1px solid var(--color-border);
+}
+
+/* ==========================================================================
+   Overall Result Badge (inline in exec summary)
+   ========================================================================== */
+
+/* (pass/fail badges removed — findings-focused approach) */
+
+/* ==========================================================================
+   Page Footer
+   ========================================================================== */
+
+.page-footer {
+    max-width: 820px;
+    margin: 0 auto;
+    padding: 16px 48px;
+    border-top: 1px solid var(--color-border);
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+}
+
+/* ==========================================================================
+   Code Locations
+   ========================================================================== */
+
+.code-location {
+    background: var(--color-row-alt);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    padding: 12px 16px;
+    margin-bottom: 12px;
+}
+.code-location .file-ref {
+    font-family: 'SF Mono', Consolas, monospace;
+    font-size: 0.8rem;
+    color: var(--brand-primary);
+    font-weight: 600;
+}
+.code-location .label {
+    color: var(--color-text-light);
+    font-size: 0.8rem;
+    margin-top: 4px;
+}
+
+/* ==========================================================================
+   CVSS Gauge (inline)
+   ========================================================================== */
+
+.cvss-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* ==========================================================================
+   Remediation Roadmap
+   ========================================================================== */
+
+.status-open {
+    color: var(--color-medium);
+    font-weight: 600;
+}
+.status-closed {
+    color: var(--color-low);
+    font-weight: 600;
+}
+
+/* ==========================================================================
+   Disclaimer Section
+   ========================================================================== */
+
+.disclaimer {
+    font-size: 0.85rem;
+    color: var(--color-text-light);
+    line-height: 1.8;
+}
+.disclaimer h3 {
+    font-size: 1rem;
+    color: var(--brand-dark);
+    margin-top: 20px;
+    margin-bottom: 6px;
+}
+
+/* ==========================================================================
+   Print Styles
+   ========================================================================== */
+
+@page {
+    size: A4;
+    margin: 0;
+}
+
+@media print {
+    body { font-size: 11pt; margin: 0; padding: 0; }
+    .cover-page { min-height: 100vh; page-break-after: always; }
+    .page-break { page-break-before: always; }
+    .report-table { page-break-inside: avoid; }
+    .finding-card { page-break-inside: avoid; }
+    .toc a { color: inherit; }
+}

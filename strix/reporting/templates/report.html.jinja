@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ report.metadata.report_title }}{% if client_name %} &mdash; {{ client_name }}{% endif %}</title>
+  <style>{{ styles_css }}</style>
+</head>
+<body>
+
+{# ===== COVER PAGE ===== #}
+{% include '_cover.html.jinja' %}
+
+{# ===== TABLE OF CONTENTS ===== #}
+{% include '_toc.html.jinja' %}
+
+{# ===== 1. EXECUTIVE SUMMARY ===== #}
+{% include '_executive_summary.html.jinja' %}
+
+{# ===== 2. SCOPE & METHODOLOGY ===== #}
+<div class="page-break"></div>
+<div class="page-header">
+  {% if logo_b64 %}<img class="header-logo-img" src="data:image/png;base64,{{ logo_b64 }}" alt="Accountable">{% else %}<span class="page-header-logo">Accountable</span>{% endif %}
+  <span class="page-header-center">{{ report.metadata.report_title | upper }} &nbsp;|&nbsp; CONFIDENTIAL</span>
+  <span class="page-header-right">{% if client_name %}{{ client_name }} &nbsp;|&nbsp; {% endif %}{{ generated_at[:10] if generated_at|length > 10 else generated_at }}</span>
+</div>
+<div class="page-content">
+  <h1 class="section-heading" id="scope-methodology">2. Scope &amp; Methodology</h1>
+  <div class="section-divider"></div>
+
+  <h2 class="sub-heading">2.1 Scope</h2>
+  <p style="margin-bottom:12px;">The following systems were authorized and included in this penetration test:</p>
+  {% if report.metadata.targets %}
+  <table class="report-table">
+    <thead><tr><th>Asset</th><th>Type</th></tr></thead>
+    <tbody>
+      {% for target in report.metadata.targets %}
+      <tr><td>{{ target }}</td><td>{% if '://' in target %}Web Application{% elif '/' in target %}Local Code{% else %}Target{% endif %}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <h2 class="sub-heading">2.2 Methodology</h2>
+  {% if report.methodology %}
+  <div class="finding-text">{{ report.methodology | e }}</div>
+  {% else %}
+  <p>This penetration test followed industry-standard frameworks:</p>
+  <ul style="margin:8px 0 16px 20px;font-size:0.875rem;line-height:1.8;">
+    <li>OWASP Testing Guide v4.2 &mdash; web application and API security testing</li>
+    <li>PTES (Penetration Testing Execution Standard) &mdash; engagement structure</li>
+    <li>NIST SP 800-115 &mdash; Technical Guide to Information Security Testing</li>
+    <li>CVSS v3.1 &mdash; vulnerability severity scoring</li>
+  </ul>
+  {% endif %}
+
+  <h2 class="sub-heading">2.3 Testing Parameters</h2>
+  <table class="report-table">
+    <thead><tr><th>Parameter</th><th>Detail</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Test Type</strong></td><td>External Penetration Test + Web Application Assessment</td></tr>
+      <tr><td><strong>Duration</strong></td><td>{{ report.metadata.duration_display }}</td></tr>
+      <tr><td><strong>Report ID</strong></td><td>{{ report.metadata.run_id | upper }}</td></tr>
+    </tbody>
+  </table>
+</div>
+
+{# ===== 3. SUMMARY OF FINDINGS ===== #}
+<div class="page-break"></div>
+<div class="page-header">
+  {% if logo_b64 %}<img class="header-logo-img" src="data:image/png;base64,{{ logo_b64 }}" alt="Accountable">{% else %}<span class="page-header-logo">Accountable</span>{% endif %}
+  <span class="page-header-center">{{ report.metadata.report_title | upper }} &nbsp;|&nbsp; CONFIDENTIAL</span>
+  <span class="page-header-right">{% if client_name %}{{ client_name }} &nbsp;|&nbsp; {% endif %}{{ generated_at[:10] if generated_at|length > 10 else generated_at }}</span>
+</div>
+<div class="page-content">
+  <h1 class="section-heading" id="summary-findings">3. Summary of Findings</h1>
+  <div class="section-divider"></div>
+
+  <p style="margin-bottom:16px;">All findings sorted by severity with CVSS scores:</p>
+
+  {% if report.vulnerabilities %}
+  <table class="report-table">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Severity</th>
+        <th>Finding</th>
+        <th>CVSS</th>
+        <th>Asset</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for vuln in report.vulnerabilities %}
+      <tr>
+        <td>{{ vuln.id | upper }}</td>
+        <td><span class="severity-badge severity-{{ vuln.severity | lower }}">{{ vuln.severity | capitalize }}</span></td>
+        <td><strong>{{ vuln.title | e }}</strong></td>
+        <td>{{ vuln.cvss if vuln.cvss is not none else 'N/A' }}</td>
+        <td>{{ vuln.target | e }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No vulnerabilities were identified during this assessment.</p>
+  {% endif %}
+</div>
+
+{# ===== 4. DETAILED FINDINGS ===== #}
+{% if report.vulnerabilities %}
+<div class="page-break"></div>
+<div class="page-header">
+  {% if logo_b64 %}<img class="header-logo-img" src="data:image/png;base64,{{ logo_b64 }}" alt="Accountable">{% else %}<span class="page-header-logo">Accountable</span>{% endif %}
+  <span class="page-header-center">{{ report.metadata.report_title | upper }} &nbsp;|&nbsp; CONFIDENTIAL</span>
+  <span class="page-header-right">{% if client_name %}{{ client_name }} &nbsp;|&nbsp; {% endif %}{{ generated_at[:10] if generated_at|length > 10 else generated_at }}</span>
+</div>
+<div class="page-content">
+  <h1 class="section-heading" id="detailed-findings">4. Detailed Findings</h1>
+  <div class="section-divider"></div>
+
+  {% for vuln in report.vulnerabilities %}
+  {% with vuln_index=loop.index, is_last=loop.last %}
+  {% include '_vuln_detail.html.jinja' %}
+  {% endwith %}
+  {% endfor %}
+</div>
+{% endif %}
+
+{# ===== 5. REMEDIATION ROADMAP ===== #}
+<div class="page-break"></div>
+<div class="page-header">
+  {% if logo_b64 %}<img class="header-logo-img" src="data:image/png;base64,{{ logo_b64 }}" alt="Accountable">{% else %}<span class="page-header-logo">Accountable</span>{% endif %}
+  <span class="page-header-center">{{ report.metadata.report_title | upper }} &nbsp;|&nbsp; CONFIDENTIAL</span>
+  <span class="page-header-right">{% if client_name %}{{ client_name }} &nbsp;|&nbsp; {% endif %}{{ generated_at[:10] if generated_at|length > 10 else generated_at }}</span>
+</div>
+<div class="page-content">
+  <h1 class="section-heading" id="remediation-roadmap">5. Remediation Roadmap</h1>
+  <div class="section-divider"></div>
+
+  {% if report.vulnerabilities %}
+  <div class="callout">
+    <strong>What This Means:</strong> This is your to-do list, in priority order. Fix the most severe items first, then work through the rest. Once everything is fixed, contact us for your free re-test.
+  </div>
+
+  <table class="report-table">
+    <thead>
+      <tr><th>#</th><th>Finding</th><th>Action Required</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+      {% for vuln in report.vulnerabilities %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td><strong>{{ vuln.id | upper }}: {{ vuln.title | e }}</strong></td>
+        <td>{{ vuln.remediation_steps[:120] | e }}{% if vuln.remediation_steps | length > 120 %}...{% endif %}</td>
+        <td><span class="status-open">Open</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No remediation actions required. All tests passed.</p>
+  {% endif %}
+
+  {% if report.recommendations %}
+  <h2 class="sub-heading">Recommendations</h2>
+  <div class="finding-text">{{ report.recommendations | e }}</div>
+  {% endif %}
+</div>
+
+{# ===== 6. TESTING TOOLS (if methodology provided) ===== #}
+{% if report.methodology %}
+<div class="page-break"></div>
+<div class="page-header">
+  {% if logo_b64 %}<img class="header-logo-img" src="data:image/png;base64,{{ logo_b64 }}" alt="Accountable">{% else %}<span class="page-header-logo">Accountable</span>{% endif %}
+  <span class="page-header-center">{{ report.metadata.report_title | upper }} &nbsp;|&nbsp; CONFIDENTIAL</span>
+  <span class="page-header-right">{% if client_name %}{{ client_name }} &nbsp;|&nbsp; {% endif %}{{ generated_at[:10] if generated_at|length > 10 else generated_at }}</span>
+</div>
+<div class="page-content">
+  <h1 class="section-heading" id="testing-tools">6. Testing Tools &amp; Techniques</h1>
+  <div class="section-divider"></div>
+
+  <table class="report-table">
+    <thead><tr><th>Phase</th><th>Tools</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Reconnaissance</strong></td><td>Nmap, Subfinder, DNS enumeration</td><td>Service discovery, port scanning, attack surface mapping</td></tr>
+      <tr><td><strong>Web App Testing</strong></td><td>Caido, Nuclei, custom scripts</td><td>OWASP Top 10, authentication testing, session analysis</td></tr>
+      <tr><td><strong>API Testing</strong></td><td>Custom scripts, fuzzing tools</td><td>Endpoint discovery, input validation, authorization testing</td></tr>
+      <tr><td><strong>Code Analysis</strong></td><td>Semgrep, manual review</td><td>Static analysis, pattern matching, vulnerability identification</td></tr>
+      <tr><td><strong>Exploitation</strong></td><td>SQLmap, custom PoC scripts</td><td>Vulnerability validation, impact demonstration</td></tr>
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{# ===== 7. APPENDIX: CVSS SEVERITY SCALE ===== #}
+<div class="page-break"></div>
+<div class="page-header">
+  {% if logo_b64 %}<img class="header-logo-img" src="data:image/png;base64,{{ logo_b64 }}" alt="Accountable">{% else %}<span class="page-header-logo">Accountable</span>{% endif %}
+  <span class="page-header-center">{{ report.metadata.report_title | upper }} &nbsp;|&nbsp; CONFIDENTIAL</span>
+  <span class="page-header-right">{% if client_name %}{{ client_name }} &nbsp;|&nbsp; {% endif %}{{ generated_at[:10] if generated_at|length > 10 else generated_at }}</span>
+</div>
+<div class="page-content">
+  <h1 class="section-heading" id="cvss-appendix">7. Appendix: CVSS Severity Scale</h1>
+  <div class="section-divider"></div>
+
+  <table class="report-table">
+    <thead><tr><th>Severity</th><th>CVSS</th><th>Definition</th><th>Remediation SLA</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><span class="severity-badge severity-critical">Critical</span></td>
+        <td>9.0&ndash;10.0</td>
+        <td>Immediate risk; full system compromise or large-scale data breach possible</td>
+        <td>Immediate (24&ndash;48 hrs)</td>
+      </tr>
+      <tr>
+        <td><span class="severity-badge severity-high">High</span></td>
+        <td>7.0&ndash;8.9</td>
+        <td>Significant risk; unauthorized access to sensitive data or systems</td>
+        <td>14 days</td>
+      </tr>
+      <tr>
+        <td><span class="severity-badge severity-medium">Medium</span></td>
+        <td>4.0&ndash;6.9</td>
+        <td>Moderate risk; exploitation requires conditions but could expose data</td>
+        <td>30 days</td>
+      </tr>
+      <tr>
+        <td><span class="severity-badge severity-low">Low</span></td>
+        <td>0.1&ndash;3.9</td>
+        <td>Minor risk; defense improvement recommended, not immediately exploitable</td>
+        <td>60 days</td>
+      </tr>
+      <tr>
+        <td><span class="severity-badge severity-info">Info</span></td>
+        <td>0.0</td>
+        <td>Best practice recommendation with no direct exploitability</td>
+        <td>Next dev cycle</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+{# ===== 8. DISCLAIMER ===== #}
+<div class="page-break"></div>
+<div class="page-header">
+  {% if logo_b64 %}<img class="header-logo-img" src="data:image/png;base64,{{ logo_b64 }}" alt="Accountable">{% else %}<span class="page-header-logo">Accountable</span>{% endif %}
+  <span class="page-header-center">{{ report.metadata.report_title | upper }} &nbsp;|&nbsp; CONFIDENTIAL</span>
+  <span class="page-header-right">{% if client_name %}{{ client_name }} &nbsp;|&nbsp; {% endif %}{{ generated_at[:10] if generated_at|length > 10 else generated_at }}</span>
+</div>
+<div class="page-content">
+  <h1 class="section-heading" id="disclaimer">8. Disclaimer &amp; Confidentiality</h1>
+  <div class="section-divider"></div>
+
+  <div class="disclaimer">
+    <h3>Confidentiality Notice</h3>
+    <p>This report is CONFIDENTIAL and intended solely for the authorized recipients. Distribution to other parties requires written consent. Unauthorized distribution may compromise the security of the assessed systems.</p>
+
+    <h3>Limitations</h3>
+    <p>A penetration test is a point-in-time assessment and cannot guarantee discovery of all vulnerabilities. New vulnerabilities may emerge after testing due to software updates, configuration changes, or newly disclosed threats. Regular testing (at minimum annually) and continuous vulnerability management is recommended.</p>
+
+    <h3>Liability</h3>
+    <p>This assessment was performed in accordance with industry best practices. All testing was non-destructive and within authorized scope. Remediation decisions remain the sole responsibility of the client.</p>
+
+    <div style="text-align:center;margin-top:40px;padding-top:20px;border-top:1px solid #e2e8f0;">
+      <strong style="color:#1a2332;">Accountable HQ</strong><br>
+      <span style="color:#64748b;">accountablehq.com</span>
+    </div>
+  </div>
+</div>
+
+<div class="page-footer">
+  <span>Accountable HQ &nbsp;|&nbsp; accountablehq.com</span>
+  <span>{{ generated_at }}</span>
+</div>
+
+</body>
+</html>

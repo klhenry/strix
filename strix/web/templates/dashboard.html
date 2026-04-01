@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<!-- New Scan -->
+<div class="card">
+    <h2>New Scan</h2>
+    <form action="/api/scans" method="post" class="scan-form">
+        <div class="field">
+            <label for="target">Target URL(s)</label>
+            <input type="text" id="target" name="target"
+                   placeholder="https://example.com (comma-separated for multiple)"
+                   required {% if active_scan %}disabled{% endif %}>
+        </div>
+        <div class="field">
+            <label for="scan_type">Scan Type</label>
+            <select id="scan_type" name="scan_type" {% if active_scan %}disabled{% endif %}
+                    onchange="updateModeOptions()">
+                <option value="pentest" selected>Penetration Test</option>
+                <option value="vuln_scan">Vulnerability Scan</option>
+            </select>
+            <small id="scan_type_desc" class="field-hint">Full penetration test with active exploitation and proof-of-concept development.</small>
+        </div>
+        <div class="field" id="mode_field">
+            <label for="scan_mode">Depth</label>
+            <select id="scan_mode" name="scan_mode" {% if active_scan %}disabled{% endif %}>
+                <option value="quick">Quick</option>
+                <option value="standard">Standard</option>
+                <option value="deep" selected>Deep</option>
+                <option value="vuln_scan" style="display:none">Vulnerability Scan</option>
+            </select>
+        </div>
+        <script>
+        function updateModeOptions() {
+            var scanType = document.getElementById('scan_type').value;
+            var modeField = document.getElementById('mode_field');
+            var modeSelect = document.getElementById('scan_mode');
+            var desc = document.getElementById('scan_type_desc');
+            if (scanType === 'vuln_scan') {
+                modeField.style.display = 'none';
+                modeSelect.value = 'vuln_scan';
+                desc.textContent = 'Lightweight scan that identifies vulnerabilities and risk areas without active exploitation.';
+            } else {
+                modeField.style.display = '';
+                if (modeSelect.value === 'vuln_scan') modeSelect.value = 'deep';
+                desc.textContent = 'Full penetration test with active exploitation and proof-of-concept development.';
+            }
+        }
+        </script>
+        <div>
+            {% if active_scan %}
+                <a href="/scans/{{ active_scan }}" class="btn btn-outline">View Active Scan</a>
+            {% else %}
+                <button type="submit" class="btn btn-primary">Start Scan</button>
+            {% endif %}
+        </div>
+    </form>
+    <details class="advanced-toggle">
+        <summary>Advanced options</summary>
+        <div class="advanced-panel">
+            <textarea name="instruction" form="scan-form"
+                      placeholder="Custom instructions for the agent (optional)..."></textarea>
+        </div>
+    </details>
+</div>
+
+<!-- Scan History -->
+<div class="card">
+    <h2>Scan History</h2>
+
+    {% if runs %}
+    <table class="scan-table">
+        <thead>
+            <tr>
+                <th>Run</th>
+                <th>Targets</th>
+                <th>Status</th>
+                <th>Findings</th>
+                <th>Duration</th>
+                <th>Reports</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for run in runs %}
+            <tr>
+                <td><a class="run-name" href="/scans/{{ run.run_name }}">{{ run.run_name }}</a></td>
+                <td>
+                    {% for t in run.targets[:2] %}
+                        <span style="color: var(--brand-text-dim)">{{ t }}</span>
+                        {% if not loop.last %}<br>{% endif %}
+                    {% endfor %}
+                    {% if run.targets|length > 2 %}
+                        <span style="color: var(--brand-text-muted)">+{{ run.targets|length - 2 }} more</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <span class="badge badge-{{ run.status }}">{{ run.status }}</span>
+                </td>
+                <td>
+                    <div class="severity-pills">
+                        {% if run.severity_counts.get('critical', 0) > 0 %}
+                            <span class="severity-pill critical">{{ run.severity_counts.critical }} Critical</span>
+                        {% endif %}
+                        {% if run.severity_counts.get('high', 0) > 0 %}
+                            <span class="severity-pill high">{{ run.severity_counts.high }} High</span>
+                        {% endif %}
+                        {% if run.severity_counts.get('medium', 0) > 0 %}
+                            <span class="severity-pill medium">{{ run.severity_counts.medium }} Medium</span>
+                        {% endif %}
+                        {% if run.severity_counts.get('low', 0) > 0 %}
+                            <span class="severity-pill low">{{ run.severity_counts.low }} Low</span>
+                        {% endif %}
+                        {% if run.vulnerability_count == 0 %}
+                            <span style="color: var(--brand-text-muted)">—</span>
+                        {% endif %}
+                    </div>
+                </td>
+                <td style="color: var(--brand-text-dim)">{{ run.duration_display }}</td>
+                <td>
+                    <div class="report-links">
+                        {% for fmt in run.available_reports %}
+                            <a href="/scans/{{ run.run_name }}/reports/{{ fmt }}" class="report-link">{{ fmt|upper }}</a>
+                        {% endfor %}
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <h3>No scans yet</h3>
+        <p>Start a penetration test above to see results here.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
