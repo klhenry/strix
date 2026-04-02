@@ -493,7 +493,13 @@ class ScanManager:
             agent = StrixAgent(agent_config)
             if state:
                 state.agent = agent
-            await agent.execute_scan(scan_config)
+            result = await agent.execute_scan(scan_config)
+
+            # Agent returns {"success": False, ...} on internal failures
+            # (sandbox init, LLM errors) without raising — treat as failure
+            if isinstance(result, dict) and not result.get("success", True):
+                error_msg = result.get("error", "Scan failed (agent returned failure)")
+                raise RuntimeError(error_msg)
 
         except asyncio.CancelledError:
             logger.info("Scan %s was cancelled (likely watchdog timeout)", run_name)
