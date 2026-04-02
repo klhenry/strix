@@ -10,10 +10,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Poetry
 RUN pip install --no-cache-dir poetry
 
-# Copy dependency files first for layer caching
-COPY pyproject.toml poetry.lock* ./
+# Copy full project so Poetry can validate all included files (e.g. README.md)
+COPY . .
 
 # Regenerate lock if out of sync, then install deps
+RUN poetry config virtualenvs.create false \
+    && poetry lock --no-update 2>/dev/null; \
+    poetry install --no-interaction --no-ansi --extras web --without dev
+# Install dependencies (no dev deps, web extra only)
 RUN poetry config virtualenvs.create false \
     && poetry lock --no-update 2>/dev/null; \
     poetry install --no-interaction --no-ansi --extras web --without dev
@@ -22,11 +26,8 @@ RUN poetry config virtualenvs.create false \
 RUN pip install --no-cache-dir playwright \
     && playwright install --with-deps chromium
 
-# Copy application code
-COPY . .
+# Default port; Railway overrides this with its own PORT env var
+ENV PORT=8080
+EXPOSE 8080
 
-# Railway sets PORT env var
-ENV PORT=8420
-EXPOSE 8420
-
-CMD ["python", "-m", "strix.web", "--host", "0.0.0.0"]
+CMD python -m strix.web --host 0.0.0.0 --port $PORT
