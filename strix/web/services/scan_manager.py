@@ -251,7 +251,7 @@ class ScanManager:
         if events_file.exists():
             import json
 
-            status = "completed"
+            status = "failed"  # default to failed; only "completed" if explicit event found
             error_msg = None
             with events_file.open(encoding="utf-8") as f:
                 for line in f:
@@ -562,10 +562,10 @@ class ScanManager:
                         post_callback(
                             webhook_meta.callback_url,
                             {
-                                "status": "completed",
+                                "status": "failed",
                                 "findings_summary": None,
                                 "pdf_uploaded": False,
-                                "error_message": "Scan completed but callback delivery failed",
+                                "error_message": "Scan completed but report delivery failed",
                             },
                             secret,
                         )
