@@ -1,5 +1,10 @@
 """Allow running with: python -m strix.web"""
 
+import warnings
+
+# Suppress SyntaxWarning from textblob's invalid escape sequences (transitive dep of scrubadub)
+warnings.filterwarnings("ignore", category=SyntaxWarning, module=r"textblob\._text")
+
 from strix.web import run_server
 
 if __name__ == "__main__":

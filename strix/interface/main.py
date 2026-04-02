@@ -3,6 +3,11 @@
 Strix Agent Interface
 """
 
+import warnings
+
+# Suppress SyntaxWarning from textblob's invalid escape sequences (transitive dep of scrubadub)
+warnings.filterwarnings("ignore", category=SyntaxWarning, module=r"textblob\._text")
+
 import argparse
 import asyncio
 import logging

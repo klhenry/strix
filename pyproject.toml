@@ -66,6 +66,7 @@ cvss = "^3.2"
 traceloop-sdk = "^0.53.0"
 opentelemetry-exporter-otlp-proto-http = "^1.40.0"
 scrubadub = "^2.0.1"
+charset-normalizer = "^3.3.0"
 
 # Optional LLM provider dependencies
 google-cloud-aiplatform = { version = ">=1.38", optional = true }
