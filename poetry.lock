@@ -3008,7 +3008,7 @@ files = [
 
 [package.dependencies]
 attrs = ">=22.2.0"
-jsonschema-specifications = ">=2023.03.6"
+jsonschema-specifications = ">=2023.3.6"
 referencing = ">=0.28.4"
 rpds-py = ">=0.7.1"
 
@@ -7258,10 +7258,10 @@ files = [
 ]
 
 [package.dependencies]
-botocore = ">=1.37.4,<2.0a.0"
+botocore = ">=1.37.4,<2.0a0"
 
 [package.extras]
-crt = ["botocore[crt] (>=1.37.4,<2.0a.0)"]
+crt = ["botocore[crt] (>=1.37.4,<2.0a0)"]
 
 [[package]]
 name = "scikit-learn"
@@ -8792,4 +8792,4 @@ web = ["fastapi", "uvicorn"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "e4d9072f75184ef6b3aa77ed914886d03e4380fc16b7464d08e26b4454ba76c3"
+content-hash = "52853a27b3c1e171f4f6dcd969bf2c973741d1e44076f785d052267514d71620"
