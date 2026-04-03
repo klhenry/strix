@@ -434,6 +434,7 @@ class ScanManager:
         webhook_meta: WebhookMeta | None = None,
     ) -> None:
         state = self._scans.get(run_name)
+        scan_succeeded = False
 
         try:
             # Ensure env vars are loaded from ~/.strix/cli-config.json
@@ -553,15 +554,24 @@ class ScanManager:
                 except Exception:  # noqa: BLE001
                     logger.exception("Failed to send failure callback for %s", run_name)
         else:
-            # Scan completed successfully — send webhook callback if applicable
-            if webhook_meta:
+            scan_succeeded = True
+        finally:
+            # Generate reports FIRST (tracer cleanup creates HTML/PDF/JSON/SARIF)
+            tracer_ref = state.tracer if state else None
+            if tracer_ref:
+                try:
+                    tracer_ref.cleanup()
+                except Exception:  # noqa: BLE001
+                    pass
+
+            # THEN send webhook callback (so the PDF exists when we try to upload it)
+            if scan_succeeded and webhook_meta:
                 logger.info("Scan %s completed — sending completion callback", run_name)
                 try:
                     await self._send_completion_callback(run_name, webhook_meta)
                     logger.info("Completion callback sent for %s", run_name)
                 except Exception:  # noqa: BLE001
                     logger.exception("Completion callback FAILED for %s — sending error callback", run_name)
-                    # If completion callback fails, at least tell Accountable it failed
                     secret = os.environ.get("WEBHOOK_SHARED_SECRET", "")
                     from strix.web.services.webhook import post_callback
                     try:
@@ -577,13 +587,6 @@ class ScanManager:
                         )
                     except Exception:  # noqa: BLE001
                         logger.exception("Fallback callback also failed for %s", run_name)
-        finally:
-            tracer_ref = state.tracer if state else None
-            if tracer_ref:
-                try:
-                    tracer_ref.cleanup()
-                except Exception:  # noqa: BLE001
-                    pass
 
             # Clean up Docker containers for this scan to prevent memory buildup
             try:
