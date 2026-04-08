@@ -43,6 +43,7 @@ class ScanState:
     last_error: str | None = None
     webhook_meta: WebhookMeta | None = None
     heartbeat_task: asyncio.Task[Any] | None = None
+    callback_failed: bool = False
 
 
 class ScanManager:
@@ -233,6 +234,19 @@ class ScanManager:
 
         # Check if it's still active
         state = self._scans.get(run_name)
+
+        # If the callback URL was unreachable, report that status so the
+        # originating app knows to re-trigger with a corrected URL.
+        if state and state.callback_failed:
+            return {
+                "status": "callback_failed",
+                "progress": 0,
+                "error_message": (
+                    "Callback URL is unreachable — the originating app should "
+                    "re-trigger this scan with a corrected callback_url/upload_url."
+                ),
+            }
+
         if state and not state.task.done():
             progress = self._estimate_progress(state)
             return {
@@ -357,6 +371,8 @@ class ScanManager:
         if state is None or state.webhook_meta is None:
             return
 
+        from strix.web.services.webhook import CallbackDeliveryError, post_callback
+
         secret = os.environ.get("WEBHOOK_SHARED_SECRET", "")
         meta = state.webhook_meta
 
@@ -388,8 +404,6 @@ class ScanManager:
                         pass
 
                     # Send failure callback
-                    from strix.web.services.webhook import post_callback
-
                     try:
                         post_callback(
                             meta.callback_url,
@@ -400,14 +414,18 @@ class ScanManager:
                             },
                             secret,
                         )
+                    except CallbackDeliveryError:
+                        logger.error(
+                            "Cannot deliver timeout callback for %s — callback_url %s is unreachable",
+                            run_name, meta.callback_url,
+                        )
+                        state.callback_failed = True
                     except Exception:  # noqa: BLE001
                         logger.exception("Failed to send timeout callback")
                     return
 
                 # Send heartbeat
                 progress = self._estimate_progress(state)
-                from strix.web.services.webhook import post_callback
-
                 try:
                     post_callback(
                         meta.callback_url,
@@ -417,6 +435,14 @@ class ScanManager:
                         },
                         secret,
                     )
+                except CallbackDeliveryError:
+                    logger.error(
+                        "Heartbeat callback unreachable for %s — callback_url %s is invalid, "
+                        "stopping heartbeat. The originating app should re-trigger this scan.",
+                        run_name, meta.callback_url,
+                    )
+                    state.callback_failed = True
+                    return
                 except Exception:  # noqa: BLE001
                     logger.warning("Failed to send heartbeat for %s", run_name)
 
@@ -507,7 +533,7 @@ class ScanManager:
             # Cancelled by watchdog — send failure callback
             if webhook_meta:
                 secret = os.environ.get("WEBHOOK_SHARED_SECRET", "")
-                from strix.web.services.webhook import post_callback
+                from strix.web.services.webhook import CallbackDeliveryError, post_callback
 
                 try:
                     post_callback(
@@ -520,6 +546,14 @@ class ScanManager:
                         secret,
                     )
                     logger.info("Sent cancellation callback for %s", run_name)
+                except CallbackDeliveryError:
+                    logger.error(
+                        "Cannot deliver cancellation callback for %s — "
+                        "callback_url %s is unreachable. Marking as callback_failed.",
+                        run_name, webhook_meta.callback_url,
+                    )
+                    if state:
+                        state.callback_failed = True
                 except Exception:  # noqa: BLE001
                     logger.exception("Failed to send cancellation callback for %s", run_name)
         except Exception as exc:
@@ -538,7 +572,7 @@ class ScanManager:
             # Send failure callback if webhook scan
             if webhook_meta:
                 secret = os.environ.get("WEBHOOK_SHARED_SECRET", "")
-                from strix.web.services.webhook import post_callback
+                from strix.web.services.webhook import CallbackDeliveryError, post_callback
 
                 try:
                     post_callback(
@@ -551,6 +585,14 @@ class ScanManager:
                         secret,
                     )
                     logger.info("Sent failure callback for %s", run_name)
+                except CallbackDeliveryError:
+                    logger.error(
+                        "Cannot deliver failure callback for %s — "
+                        "callback_url %s is unreachable. Marking as callback_failed.",
+                        run_name, webhook_meta.callback_url,
+                    )
+                    if state:
+                        state.callback_failed = True
                 except Exception:  # noqa: BLE001
                     logger.exception("Failed to send failure callback for %s", run_name)
         else:
@@ -570,23 +612,43 @@ class ScanManager:
                 try:
                     await self._send_completion_callback(run_name, webhook_meta)
                     logger.info("Completion callback sent for %s", run_name)
-                except Exception:  # noqa: BLE001
-                    logger.exception("Completion callback FAILED for %s — sending error callback", run_name)
-                    secret = os.environ.get("WEBHOOK_SHARED_SECRET", "")
-                    from strix.web.services.webhook import post_callback
-                    try:
-                        post_callback(
-                            webhook_meta.callback_url,
-                            {
-                                "status": "failed",
-                                "findings_summary": None,
-                                "pdf_uploaded": False,
-                                "error_message": "Scan completed but report delivery failed",
-                            },
-                            secret,
+                except Exception as cb_exc:  # noqa: BLE001
+                    from strix.web.services.webhook import CallbackDeliveryError
+
+                    if isinstance(cb_exc, CallbackDeliveryError):
+                        logger.error(
+                            "Completion callback unreachable for %s — "
+                            "callback_url %s is invalid. Marking as callback_failed. "
+                            "The originating app should re-trigger this scan.",
+                            run_name, webhook_meta.callback_url,
                         )
-                    except Exception:  # noqa: BLE001
-                        logger.exception("Fallback callback also failed for %s", run_name)
+                        if state:
+                            state.callback_failed = True
+                    else:
+                        logger.exception("Completion callback FAILED for %s — sending error callback", run_name)
+                        secret = os.environ.get("WEBHOOK_SHARED_SECRET", "")
+                        from strix.web.services.webhook import post_callback
+                        try:
+                            post_callback(
+                                webhook_meta.callback_url,
+                                {
+                                    "status": "failed",
+                                    "findings_summary": None,
+                                    "pdf_uploaded": False,
+                                    "error_message": "Scan completed but report delivery failed",
+                                },
+                                secret,
+                            )
+                        except CallbackDeliveryError:
+                            logger.error(
+                                "Fallback callback also unreachable for %s — "
+                                "callback_url %s. Marking as callback_failed.",
+                                run_name, webhook_meta.callback_url,
+                            )
+                            if state:
+                                state.callback_failed = True
+                        except Exception:  # noqa: BLE001
+                            logger.exception("Fallback callback also failed for %s", run_name)
 
             # Clean up Docker containers for this scan to prevent memory buildup
             try:
