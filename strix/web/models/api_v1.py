@@ -21,6 +21,6 @@ class ScanAcceptedResponse(BaseModel):
 
 
 class ScanStatusResponse(BaseModel):
-    status: Literal["pending", "in_progress", "completed", "failed"]
+    status: Literal["pending", "in_progress", "completed", "failed", "callback_failed"]
     progress: int = 0
     error_message: str | None = None

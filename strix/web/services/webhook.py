@@ -11,9 +11,17 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
+
+
+class CallbackDeliveryError(Exception):
+    """Raised when a callback or upload cannot be delivered (e.g. wrong host)."""
+
+    def __init__(self, message: str, *, is_connection_error: bool = False) -> None:
+        super().__init__(message)
+        self.is_connection_error = is_connection_error
 
 
 def sign_payload(body: str, secret: str) -> tuple[str, str]:
@@ -31,9 +39,17 @@ def sign_payload(body: str, secret: str) -> tuple[str, str]:
     return signature, timestamp
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=30))
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(min=2, max=30),
+    retry=retry_if_not_exception_type(CallbackDeliveryError),
+)
 def post_callback(url: str, payload: dict[str, Any], secret: str) -> bool:
-    """POST an HMAC-signed JSON payload to the callback URL. Retries 3x."""
+    """POST an HMAC-signed JSON payload to the callback URL. Retries 3x.
+
+    Raises ``CallbackDeliveryError`` immediately on connection errors (wrong
+    host, refused, DNS failure) since retrying cannot fix those.
+    """
     body = json.dumps(payload)
     signature, timestamp = sign_payload(body, secret)
 
@@ -44,15 +60,28 @@ def post_callback(url: str, payload: dict[str, Any], secret: str) -> bool:
     }
 
     logger.info("Sending callback to %s (status=%s)", url, payload.get("status"))
-    resp = requests.post(url, data=body, headers=headers, timeout=30)
-    resp.raise_for_status()
+    try:
+        resp = requests.post(url, data=body, headers=headers, timeout=30)
+        resp.raise_for_status()
+    except requests.exceptions.ConnectionError as exc:
+        raise CallbackDeliveryError(
+            f"Connection failed for callback to {url}: {exc}",
+            is_connection_error=True,
+        ) from exc
     logger.info("Callback accepted: %s %s", resp.status_code, resp.reason)
     return True
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=30))
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(min=2, max=30),
+    retry=retry_if_not_exception_type(CallbackDeliveryError),
+)
 def upload_pdf(upload_url: str, pdf_path: Path, api_key: str = "") -> bool:
-    """PUT the PDF report to the upload endpoint with Bearer auth."""
+    """PUT the PDF report to the upload endpoint with Bearer auth.
+
+    Raises ``CallbackDeliveryError`` immediately on connection errors.
+    """
     if not pdf_path.exists():
         logger.error("PDF not found at %s", pdf_path)
         return False
@@ -64,13 +93,19 @@ def upload_pdf(upload_url: str, pdf_path: Path, api_key: str = "") -> bool:
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    resp = requests.put(
-        upload_url,
-        data=pdf_bytes,
-        headers=headers,
-        timeout=120,
-    )
-    resp.raise_for_status()
+    try:
+        resp = requests.put(
+            upload_url,
+            data=pdf_bytes,
+            headers=headers,
+            timeout=120,
+        )
+        resp.raise_for_status()
+    except requests.exceptions.ConnectionError as exc:
+        raise CallbackDeliveryError(
+            f"Connection failed for PDF upload to {upload_url}: {exc}",
+            is_connection_error=True,
+        ) from exc
     logger.info("PDF upload accepted: %s %s", resp.status_code, resp.reason)
     return True
 
