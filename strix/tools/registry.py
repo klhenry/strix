@@ -204,6 +204,8 @@ def register_tool(
             return f
 
         sandbox_mode = _is_sandbox_mode()
+        standalone = os.getenv("STRIX_STANDALONE", "false").lower() == "true"
+        needs_schema = not sandbox_mode or standalone
         func_dict = {
             "name": f.__name__,
             "function": f,
@@ -211,7 +213,7 @@ def register_tool(
             "sandbox_execution": sandbox_execution,
         }
 
-        if not sandbox_mode:
+        if needs_schema:
             try:
                 schema_path = _get_schema_path(f)
                 xml_tools = _load_xml_schema(schema_path) if schema_path else None
@@ -232,7 +234,7 @@ def register_tool(
                     "</tool>"
                 )
 
-        if not sandbox_mode:
+        if needs_schema:
             xml_schema = func_dict.get("xml_schema")
             param_schema = _parse_param_schema(xml_schema if isinstance(xml_schema, str) else "")
             _tool_param_schemas[str(func_dict["name"])] = param_schema
