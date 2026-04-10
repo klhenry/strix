@@ -58,6 +58,32 @@ def test_sandbox_registers_sandbox_tools_but_not_non_sandbox_tools(
     assert "web_search" not in names
 
 
+def test_standalone_registers_all_tools_with_schemas(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setenv("STRIX_SANDBOX_MODE", "true")
+    monkeypatch.setenv("STRIX_STANDALONE", "true")
+    monkeypatch.setenv("STRIX_DISABLE_BROWSER", "true")
+    monkeypatch.delenv("PERPLEXITY_API_KEY", raising=False)
+    monkeypatch.setattr(Config, "load", classmethod(_empty_config_load))
+
+    tools_module = _reload_tools_module()
+    names = set(tools_module.get_tool_names())
+
+    # Standalone registers both sandbox and non-sandbox tools
+    assert "terminal_execute" in names
+    assert "create_agent" in names
+    assert "finish_scan" in names
+    assert "create_vulnerability_report" in names
+
+    # Verify schemas are loaded (tools appear in the prompt)
+    from strix.tools.registry import tools as registered_tools
+
+    for tool in registered_tools:
+        schema = tool.get("xml_schema", "")
+        assert schema, f"Tool '{tool['name']}' has no XML schema in standalone mode"
+
+
 def test_load_skill_import_does_not_register_create_agent_in_sandbox(
     monkeypatch: Any,
 ) -> None:
