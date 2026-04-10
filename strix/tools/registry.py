@@ -179,8 +179,9 @@ def _should_register_tool(
     requires_web_search_mode: bool,
 ) -> bool:
     sandbox_mode = _is_sandbox_mode()
+    standalone = os.getenv("STRIX_STANDALONE", "false").lower() == "true"
 
-    if sandbox_mode and not sandbox_execution:
+    if sandbox_mode and not standalone and not sandbox_execution:
         return False
     if requires_browser_mode and _is_browser_disabled():
         return False

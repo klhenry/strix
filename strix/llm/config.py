@@ -39,7 +39,7 @@ class LLMConfig:
             "vuln_scan": 75, "quick": 50, "standard": 150, "deep": 300,
         }.get(self.scan_mode, 300)
         self.sub_agent_max_iterations = {
-            "vuln_scan": 0, "quick": 25, "standard": 75, "deep": 150,
+            "vuln_scan": 10, "quick": 25, "standard": 75, "deep": 150,
         }.get(self.scan_mode, 150)
         self.sub_agent_timeout = {
             "vuln_scan": 900, "quick": 600, "standard": 1800, "deep": 3600,
