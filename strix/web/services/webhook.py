@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception, retry_if_not_exception_type, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
 
@@ -72,13 +72,31 @@ def post_callback(url: str, payload: dict[str, Any], secret: str) -> bool:
     return True
 
 
+def _is_presigned_s3_url(url: str) -> bool:
+    """Return True if the URL looks like a pre-signed S3 URL."""
+    return "X-Amz-Signature" in url or "x-amz-signature" in url
+
+
+def _is_retryable_upload_error(exc: BaseException) -> bool:
+    """Return True for transient errors worth retrying (5xx, timeouts)."""
+    if isinstance(exc, CallbackDeliveryError):
+        return False
+    if isinstance(exc, requests.exceptions.HTTPError) and exc.response is not None:
+        return exc.response.status_code >= 500
+    return not isinstance(exc, requests.exceptions.HTTPError)
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(min=2, max=30),
-    retry=retry_if_not_exception_type(CallbackDeliveryError),
+    retry=retry_if_exception(_is_retryable_upload_error),
 )
 def upload_pdf(upload_url: str, pdf_path: Path, api_key: str = "") -> bool:
-    """PUT the PDF report to the upload endpoint with Bearer auth.
+    """PUT the PDF report to the upload endpoint.
+
+    For pre-signed S3 URLs, only ``Content-Type`` is sent (no Bearer token)
+    because S3 rejects requests that mix pre-signed query-string auth with an
+    ``Authorization`` header.
 
     Raises ``CallbackDeliveryError`` immediately on connection errors.
     """
@@ -90,7 +108,7 @@ def upload_pdf(upload_url: str, pdf_path: Path, api_key: str = "") -> bool:
     logger.info("Uploading PDF (%d KB) to %s", len(pdf_bytes) // 1024, upload_url)
 
     headers: dict[str, str] = {"Content-Type": "application/pdf"}
-    if api_key:
+    if api_key and not _is_presigned_s3_url(upload_url):
         headers["Authorization"] = f"Bearer {api_key}"
 
     try:
