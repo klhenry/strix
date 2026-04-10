@@ -438,10 +438,11 @@ class ScanManager:
                 except CallbackDeliveryError:
                     logger.error(
                         "Heartbeat callback unreachable for %s — callback_url %s is invalid, "
-                        "stopping heartbeat. The originating app should re-trigger this scan.",
+                        "cancelling scan. The originating app should re-trigger this scan.",
                         run_name, meta.callback_url,
                     )
                     state.callback_failed = True
+                    state.task.cancel()
                     return
                 except Exception:  # noqa: BLE001
                     logger.warning("Failed to send heartbeat for %s", run_name)
