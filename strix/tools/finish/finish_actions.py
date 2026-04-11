@@ -162,13 +162,10 @@ def finish_scan(
             }
 
         logging.warning("Current tracer not available - scan results not stored")
+        return {
+            "success": False,
+            "message": "Cannot complete scan — tracer unavailable, results not stored",
+        }
 
     except (ImportError, AttributeError) as e:
         return {"success": False, "message": f"Failed to complete scan: {e!s}"}
-    else:
-        return {
-            "success": True,
-            "scan_completed": True,
-            "message": "Scan completed (not persisted)",
-            "warning": "Results could not be persisted - tracer unavailable",
-        }

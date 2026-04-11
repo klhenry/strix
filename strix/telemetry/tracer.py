@@ -1,6 +1,7 @@
 import json
 import logging
 import threading
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -30,19 +31,18 @@ except ImportError:  # pragma: no cover - exercised when dependency is absent
 
 logger = logging.getLogger(__name__)
 
-_global_tracer: Optional["Tracer"] = None
+_tracer_var: ContextVar[Optional["Tracer"]] = ContextVar("_tracer_var", default=None)
 
 _OTEL_BOOTSTRAP_LOCK = threading.Lock()
 _OTEL_BOOTSTRAPPED = False
 _OTEL_REMOTE_ENABLED = False
 
 def get_global_tracer() -> Optional["Tracer"]:
-    return _global_tracer
+    return _tracer_var.get()
 
 
 def set_global_tracer(tracer: "Tracer") -> None:
-    global _global_tracer  # noqa: PLW0603
-    _global_tracer = tracer
+    _tracer_var.set(tracer)
 
 
 class Tracer:

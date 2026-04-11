@@ -327,12 +327,10 @@ def create_vulnerability_report(  # noqa: PLR0912
         import logging
 
         logging.warning("Current tracer not available - vulnerability report not stored")
+        return {
+            "success": False,
+            "message": f"Vulnerability report '{title}' could not be saved — tracer unavailable",
+        }
 
     except (ImportError, AttributeError) as e:
         return {"success": False, "message": f"Failed to create vulnerability report: {e!s}"}
-    else:
-        return {
-            "success": True,
-            "message": f"Vulnerability report '{title}' created (not persisted)",
-            "warning": "Report could not be persisted - tracer unavailable",
-        }

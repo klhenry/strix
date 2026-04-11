@@ -19,7 +19,7 @@ def _load_events(events_path: Path) -> list[dict[str, Any]]:
 
 @pytest.fixture(autouse=True)
 def _reset_tracer_globals(monkeypatch) -> None:
-    monkeypatch.setattr(tracer_module, "_global_tracer", None)
+    tracer_module._tracer_var.set(None)
     monkeypatch.setattr(tracer_module, "_OTEL_BOOTSTRAPPED", False)
     monkeypatch.setattr(tracer_module, "_OTEL_REMOTE_ENABLED", False)
     telemetry_utils.reset_events_write_locks()
