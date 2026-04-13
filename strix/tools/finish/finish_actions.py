@@ -145,14 +145,28 @@ def finish_scan(
 
         tracer = get_global_tracer()
         if tracer:
+            vulnerability_count = len(tracer.vulnerability_reports)
+            logger.info(
+                "[FINISH_SCAN] finish_scan called — vulnerability_reports=%d, "
+                "tracer_run_id=%s, tracer_id=%s",
+                vulnerability_count,
+                tracer.run_id,
+                id(tracer),
+            )
+            if vulnerability_count == 0:
+                logger.warning(
+                    "[FINISH_SCAN] Scan completing with 0 vulnerability reports. "
+                    "Either no vulnerabilities were found, or create_vulnerability_report "
+                    "was never called / always failed. Check earlier logs for "
+                    "[VULN_REPORT] entries.",
+                )
+
             tracer.update_scan_final_fields(
                 executive_summary=executive_summary.strip(),
                 methodology=methodology.strip(),
                 technical_analysis=technical_analysis.strip(),
                 recommendations=recommendations.strip(),
             )
-
-            vulnerability_count = len(tracer.vulnerability_reports)
 
             return {
                 "success": True,
@@ -161,11 +175,15 @@ def finish_scan(
                 "vulnerabilities_found": vulnerability_count,
             }
 
-        logging.warning("Current tracer not available - scan results not stored")
+        logger.warning(
+            "[FINISH_SCAN] Tracer UNAVAILABLE — scan results not stored. "
+            "The PDF report will have no findings.",
+        )
         return {
             "success": False,
             "message": "Cannot complete scan — tracer unavailable, results not stored",
         }
 
     except (ImportError, AttributeError) as e:
+        logger.error("[FINISH_SCAN] EXCEPTION: %s", e, exc_info=True)
         return {"success": False, "message": f"Failed to complete scan: {e!s}"}
