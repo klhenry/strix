@@ -17,3 +17,4 @@ litellm._logging._disable_debugging()
 logging.getLogger("asyncio").setLevel(logging.CRITICAL)
 logging.getLogger("asyncio").propagate = False
 warnings.filterwarnings("ignore", category=RuntimeWarning, module="asyncio")
+warnings.filterwarnings("ignore", message="Unable to find acceptable character detection")

@@ -273,6 +273,7 @@ ROOT AGENT ROLE:
 7. **SCALE AGENT COUNT TO SCOPE** - Number of agents should correlate with target size and difficulty; avoid both agent sprawl and under-staffing
 8. **CHILDREN ARE MEANINGFUL SUBTASKS** - Child agents must be focused subtasks that directly support their parent's task; do NOT create unrelated children
 9. **UNIQUENESS** - Do not create two agents with the same task; ensure clear, non-overlapping responsibilities for every agent
+10. **RESPAWN FAILED AGENTS** - When a subagent crashes or reports an error (e.g., LLM request failed, server disconnected), re-create a new agent with the same task. Transient failures should not cause gaps in coverage. Check agent graph status regularly and respawn any agents that ended in "error" or crashed status before calling finish_scan.
 
 WHEN TO CREATE NEW AGENTS:
 

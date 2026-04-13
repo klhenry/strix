@@ -14,6 +14,8 @@ os.environ.setdefault("STRIX_STANDALONE", "true")
 
 # Suppress SyntaxWarning from textblob's invalid escape sequences (transitive dep of scrubadub)
 warnings.filterwarnings("ignore", category=SyntaxWarning, module=r"textblob\._text")
+# Suppress RequestsDependencyWarning when neither chardet nor charset_normalizer is installed
+warnings.filterwarnings("ignore", message="Unable to find acceptable character detection")
 
 from strix.web import run_server
 

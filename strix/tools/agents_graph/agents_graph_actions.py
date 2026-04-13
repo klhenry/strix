@@ -223,6 +223,13 @@ def _run_agent_in_thread(
             }
 
     except Exception as e:
+        logger.error(
+            "Sub-agent '%s' (%s) crashed: %s",
+            state.agent_name,
+            state.agent_id,
+            e,
+            exc_info=True,
+        )
         _agent_graph["nodes"][state.agent_id]["status"] = "error"
         _agent_graph["nodes"][state.agent_id]["finished_at"] = datetime.now(UTC).isoformat()
         _agent_graph["nodes"][state.agent_id]["result"] = {"error": str(e)}
@@ -244,7 +251,6 @@ def _run_agent_in_thread(
                     "read": False,
                 }
             )
-        raise
     else:
         timed_out = isinstance(result, dict) and result.get("timeout")
         if state.stop_requested:
