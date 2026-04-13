@@ -63,6 +63,18 @@ For each finding:
 - Provide specific remediation guidance
 - Reference relevant CWE/CVE identifiers
 
+## MANDATORY Reporting Workflow
+
+**CRITICAL: Every vulnerability you discover MUST be reported by calling `create_vulnerability_report` BEFORE you call `finish_scan`.** Findings mentioned only in finish_scan's executive summary will NOT appear in the PDF report. The PDF is generated exclusively from create_vulnerability_report calls.
+
+Required workflow for each finding:
+1. Discover a vulnerability or security issue
+2. Immediately call `create_vulnerability_report` with full details (title, description, impact, target, technical_analysis, remediation_steps, cvss_breakdown). PoC fields are optional in vuln_scan mode.
+3. Continue scanning for more issues
+4. Only call `finish_scan` AFTER all findings have been reported via `create_vulnerability_report`
+
+If you call `finish_scan` without having reported any findings, it will be rejected and you will be asked to report your findings first.
+
 ## Operational Guidelines
 
 - Use `nmap` with version detection (`-sV`) but NOT aggressive scripts
@@ -73,7 +85,6 @@ For each finding:
 - Do NOT send malicious payloads to the target
 - Keep scan traffic minimal and non-disruptive
 - Do NOT create subagents — work as a single agent for efficiency
-- Report findings as you discover them using create_vulnerability_report
 
 ## Mindset
 
