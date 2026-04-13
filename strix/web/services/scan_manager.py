@@ -522,6 +522,21 @@ class ScanManager:
             if state:
                 state.agent = agent
 
+            # Verify critical tools are registered — if they're missing, the
+            # agent can never report findings and the PDF will always be empty.
+            from strix.tools.registry import get_tool_names
+
+            registered = set(get_tool_names())
+            critical_tools = {"create_vulnerability_report", "finish_scan"}
+            missing = critical_tools - registered
+            if missing:
+                logger.error(
+                    "[SCAN_LIFECYCLE] CRITICAL: tools %s are NOT registered! "
+                    "The agent will be unable to report findings. Ensure "
+                    "STRIX_SANDBOX_MODE=true and STRIX_STANDALONE=true are set.",
+                    missing,
+                )
+
             logger.info(
                 "[SCAN_LIFECYCLE] Agent starting scan — run_name=%s, mode=%s, "
                 "targets=%s, tracer_id=%s",

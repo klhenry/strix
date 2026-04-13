@@ -21,6 +21,12 @@ RUN poetry config virtualenvs.create false \
 RUN pip install --no-cache-dir playwright \
     && playwright install --with-deps chromium
 
+# The web server runs scans locally (no Docker-in-Docker sandbox), so we
+# need standalone mode so that ALL tools — including create_vulnerability_report
+# and finish_scan — are registered and execute in-process.
+ENV STRIX_SANDBOX_MODE=true
+ENV STRIX_STANDALONE=true
+
 # Default port; Railway overrides this with its own PORT env var
 ENV PORT=8080
 EXPOSE 8080
