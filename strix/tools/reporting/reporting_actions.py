@@ -164,8 +164,6 @@ def _validate_required_fields(**kwargs: str | None) -> list[str]:
         "impact": "Impact cannot be empty",
         "target": "Target cannot be empty",
         "technical_analysis": "Technical analysis cannot be empty",
-        "poc_description": "PoC description cannot be empty",
-        "poc_script_code": "PoC script/code is REQUIRED - provide the actual exploit/payload",
         "remediation_steps": "Remediation steps cannot be empty",
     }
 
@@ -208,10 +206,10 @@ def create_vulnerability_report(  # noqa: PLR0912
     impact: str,
     target: str,
     technical_analysis: str,
-    poc_description: str,
-    poc_script_code: str,
     remediation_steps: str,
     cvss_breakdown: str,
+    poc_description: str | None = None,
+    poc_script_code: str | None = None,
     endpoint: str | None = None,
     method: str | None = None,
     cve: str | None = None,
