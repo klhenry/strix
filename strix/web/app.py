@@ -84,6 +84,13 @@ def run_server(
 
     import uvicorn
 
+    # The web server runs scans in-process (no Docker sandbox), so ensure
+    # standalone mode is set before any tool modules are imported.  Without
+    # this, create_vulnerability_report and finish_scan are silently excluded
+    # from the tool registry and the agent can never report findings.
+    os.environ.setdefault("STRIX_SANDBOX_MODE", "true")
+    os.environ.setdefault("STRIX_STANDALONE", "true")
+
     _load_strix_config()
     port = int(os.environ.get("PORT", str(port)))
     app = create_app(strix_runs_dir)
