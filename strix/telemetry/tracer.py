@@ -52,6 +52,11 @@ def set_global_tracer(tracer: "Tracer") -> None:
     global _fallback_tracer  # noqa: PLW0603
     _tracer_var.set(tracer)
     _fallback_tracer = tracer
+    logger.info(
+        "[TRACER] set_global_tracer — run_id=%s, tracer_id=%s",
+        tracer.run_id if tracer else None,
+        id(tracer),
+    )
 
 
 class Tracer:
@@ -770,6 +775,29 @@ class Tracer:
                     from strix.reporting.json_report import generate_json_summary
                     from strix.reporting.models import ScanReport
                     from strix.reporting.sarif_report import generate_sarif_report
+
+                    logger.info(
+                        "[REPORT_GEN] Generating final reports — "
+                        "vulnerability_reports=%d, tracer_id=%s, run_id=%s",
+                        len(self.vulnerability_reports),
+                        id(self),
+                        self.run_id,
+                    )
+                    if self.vulnerability_reports:
+                        for i, vr in enumerate(self.vulnerability_reports):
+                            logger.info(
+                                "[REPORT_GEN]   finding[%d]: id=%s, severity=%s, title=%r",
+                                i,
+                                vr.get("id"),
+                                vr.get("severity"),
+                                (vr.get("title", "")[:80]),
+                            )
+                    else:
+                        logger.warning(
+                            "[REPORT_GEN] vulnerability_reports list is EMPTY — "
+                            "PDF will show 0 findings. This is the direct cause of "
+                            "an empty report.",
+                        )
 
                     scan_report = ScanReport.from_tracer(self)
 

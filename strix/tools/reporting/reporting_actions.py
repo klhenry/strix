@@ -1,9 +1,12 @@
 import contextlib
+import logging
 import re
 from pathlib import PurePosixPath
 from typing import Any
 
 from strix.tools.registry import register_tool
+
+logger = logging.getLogger(__name__)
 
 
 _CVSS_FIELDS = (
@@ -215,6 +218,12 @@ def create_vulnerability_report(  # noqa: PLR0912
     cwe: str | None = None,
     code_locations: str | None = None,
 ) -> dict[str, Any]:
+    logger.info(
+        "[VULN_REPORT] create_vulnerability_report called — title=%r, target=%r, endpoint=%r",
+        title[:120] if title else None,
+        target[:120] if target else None,
+        endpoint,
+    )
     validation_errors = _validate_required_fields(
         title=title,
         description=description,
@@ -248,6 +257,11 @@ def create_vulnerability_report(  # noqa: PLR0912
             validation_errors.append(cwe_err)
 
     if validation_errors:
+        logger.warning(
+            "[VULN_REPORT] Validation FAILED for %r — errors: %s",
+            title[:80] if title else None,
+            validation_errors,
+        )
         return {"success": False, "message": "Validation failed", "errors": validation_errors}
 
     assert parsed_cvss is not None
@@ -285,6 +299,13 @@ def create_vulnerability_report(  # noqa: PLR0912
                         duplicate_title = report.get("title", "Unknown")
                         break
 
+                logger.info(
+                    "[VULN_REPORT] Duplicate detected — %r is duplicate of %r (id=%s, confidence=%.2f)",
+                    title[:80] if title else None,
+                    duplicate_title,
+                    duplicate_id[:8] if duplicate_id else "?",
+                    dedupe_result.get("confidence", 0.0),
+                )
                 return {
                     "success": False,
                     "message": (
@@ -316,6 +337,15 @@ def create_vulnerability_report(  # noqa: PLR0912
                 code_locations=parsed_locations,
             )
 
+            logger.info(
+                "[VULN_REPORT] SUCCESS — report_id=%s, title=%r, severity=%s, cvss=%.1f, "
+                "total_reports_now=%d",
+                report_id,
+                title[:80] if title else None,
+                severity,
+                cvss_score,
+                len(tracer.vulnerability_reports),
+            )
             return {
                 "success": True,
                 "message": f"Vulnerability report '{title}' created successfully",
@@ -324,13 +354,21 @@ def create_vulnerability_report(  # noqa: PLR0912
                 "cvss_score": cvss_score,
             }
 
-        import logging
-
-        logging.warning("Current tracer not available - vulnerability report not stored")
+        logger.warning(
+            "[VULN_REPORT] Tracer UNAVAILABLE — report %r could not be saved. "
+            "This means findings will NOT appear in the final PDF.",
+            title[:80] if title else None,
+        )
         return {
             "success": False,
             "message": f"Vulnerability report '{title}' could not be saved — tracer unavailable",
         }
 
     except (ImportError, AttributeError) as e:
+        logger.error(
+            "[VULN_REPORT] EXCEPTION storing report %r: %s",
+            title[:80] if title else None,
+            e,
+            exc_info=True,
+        )
         return {"success": False, "message": f"Failed to create vulnerability report: {e!s}"}

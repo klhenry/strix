@@ -521,7 +521,26 @@ class ScanManager:
             agent = StrixAgent(agent_config)
             if state:
                 state.agent = agent
+
+            logger.info(
+                "[SCAN_LIFECYCLE] Agent starting scan — run_name=%s, mode=%s, "
+                "targets=%s, tracer_id=%s",
+                run_name,
+                scan_mode,
+                [t.get("original", "?") for t in targets_info],
+                id(tracer),
+            )
             result = await agent.execute_scan(scan_config)
+
+            # Log scan completion with vulnerability count
+            vuln_count = len(tracer.vulnerability_reports) if tracer else -1
+            logger.info(
+                "[SCAN_LIFECYCLE] Agent finished — run_name=%s, "
+                "vulnerability_reports=%d, agent_result_success=%s",
+                run_name,
+                vuln_count,
+                result.get("success") if isinstance(result, dict) else "N/A",
+            )
 
             # Agent returns {"success": False, ...} on internal failures
             # (sandbox init, LLM errors) without raising — treat as failure
@@ -602,10 +621,25 @@ class ScanManager:
             # Generate reports FIRST (tracer cleanup creates HTML/PDF/JSON/SARIF)
             tracer_ref = state.tracer if state else None
             if tracer_ref:
+                logger.info(
+                    "[SCAN_LIFECYCLE] Running tracer.cleanup() — "
+                    "vulnerability_reports=%d, tracer_id=%s, run_name=%s",
+                    len(tracer_ref.vulnerability_reports),
+                    id(tracer_ref),
+                    run_name,
+                )
                 try:
                     tracer_ref.cleanup()
                 except Exception:  # noqa: BLE001
-                    pass
+                    logger.exception(
+                        "[SCAN_LIFECYCLE] tracer.cleanup() FAILED for %s", run_name,
+                    )
+            else:
+                logger.warning(
+                    "[SCAN_LIFECYCLE] No tracer ref available at cleanup for %s — "
+                    "reports will NOT be generated",
+                    run_name,
+                )
 
             # THEN send webhook callback (so the PDF exists when we try to upload it)
             if scan_succeeded and webhook_meta:
