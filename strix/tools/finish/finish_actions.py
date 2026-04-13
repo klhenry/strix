@@ -9,6 +9,10 @@ logger = logging.getLogger(__name__)
 _finish_scan_attempts: dict[str, int] = {}
 _MAX_ATTEMPTS_BEFORE_FORCE: int = 3
 
+# Track agents that have already been warned about 0 findings so we allow
+# them through on the second call.
+_zero_findings_warned: set[str] = set()
+
 
 def _validate_root_agent(agent_state: Any) -> dict[str, Any] | None:
     if agent_state and hasattr(agent_state, "parent_id") and agent_state.parent_id is not None:
@@ -146,6 +150,11 @@ def finish_scan(
         tracer = get_global_tracer()
         if tracer:
             vulnerability_count = len(tracer.vulnerability_reports)
+            agent_id = (
+                agent_state.agent_id
+                if agent_state and hasattr(agent_state, "agent_id")
+                else "unknown"
+            )
             logger.info(
                 "[FINISH_SCAN] finish_scan called — vulnerability_reports=%d, "
                 "tracer_run_id=%s, tracer_id=%s",
@@ -160,6 +169,34 @@ def finish_scan(
                     "was never called / always failed. Check earlier logs for "
                     "[VULN_REPORT] entries.",
                 )
+
+            # ── Zero-findings guard ──────────────────────────────────
+            # On the FIRST finish_scan call with 0 findings, bounce the
+            # agent back so it has a chance to call
+            # create_vulnerability_report.  Allow through on retry so
+            # scans that genuinely find nothing can still complete.
+            if vulnerability_count == 0 and agent_id not in _zero_findings_warned:
+                _zero_findings_warned.add(agent_id)
+                logger.info(
+                    "[FINISH_SCAN] Returning zero-findings prompt for agent %s",
+                    agent_id,
+                )
+                return {
+                    "success": False,
+                    "error": "no_vulnerability_reports",
+                    "message": (
+                        "You are trying to finish the scan but have not created "
+                        "any vulnerability reports. The PDF report will be empty "
+                        "unless you call create_vulnerability_report for each "
+                        "finding BEFORE calling finish_scan.\n\n"
+                        "ACTION REQUIRED: Review the issues you discovered during "
+                        "this scan and call create_vulnerability_report for each "
+                        "one now. After reporting all findings, call finish_scan "
+                        "again.\n\n"
+                        "If you genuinely found zero vulnerabilities, call "
+                        "finish_scan once more to confirm."
+                    ),
+                }
 
             tracer.update_scan_final_fields(
                 executive_summary=executive_summary.strip(),

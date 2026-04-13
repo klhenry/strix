@@ -228,8 +228,6 @@ def create_vulnerability_report(  # noqa: PLR0912
         impact=impact,
         target=target,
         technical_analysis=technical_analysis,
-        poc_description=poc_description,
-        poc_script_code=poc_script_code,
         remediation_steps=remediation_steps,
     )
 
