@@ -483,6 +483,7 @@ class ScanManager:
             from strix.agents.StrixAgent import StrixAgent
             from strix.interface.utils import infer_target_type
             from strix.llm.config import LLMConfig
+            from strix.llm.llm import LLMRequestFailedError
             from strix.telemetry.tracer import Tracer, set_global_tracer
 
             targets_info = []
@@ -545,7 +546,43 @@ class ScanManager:
                 [t.get("original", "?") for t in targets_info],
                 id(tracer),
             )
-            result = await agent.execute_scan(scan_config)
+
+            # Retry loop: recover from transient LLM provider errors (500s,
+            # timeouts, connection drops) before giving up on the whole scan.
+            _SCAN_MAX_RETRIES = 3
+            _SCAN_RETRY_BACKOFF = [2, 4, 8]  # seconds between attempts
+            _LLM_TRANSIENT_ERRORS = (
+                LLMRequestFailedError,
+                TimeoutError,
+                ConnectionError,
+            )
+            result = None
+            for _attempt in range(_SCAN_MAX_RETRIES + 1):
+                try:
+                    result = await agent.execute_scan(scan_config)
+                    break  # success — exit retry loop
+                except _LLM_TRANSIENT_ERRORS as _llm_exc:
+                    if _attempt >= _SCAN_MAX_RETRIES:
+                        logger.error(
+                            "[SCAN_LIFECYCLE] Scan %s failed after %d retries — "
+                            "giving up: %s",
+                            run_name,
+                            _SCAN_MAX_RETRIES,
+                            _llm_exc,
+                        )
+                        raise
+                    _wait = _SCAN_RETRY_BACKOFF[_attempt]
+                    logger.warning(
+                        "[SCAN_LIFECYCLE] Transient LLM error on attempt %d/%d for "
+                        "scan %s (%s: %s) — retrying in %ds",
+                        _attempt + 1,
+                        _SCAN_MAX_RETRIES,
+                        run_name,
+                        type(_llm_exc).__name__,
+                        _llm_exc,
+                        _wait,
+                    )
+                    await asyncio.sleep(_wait)
 
             # Log scan completion with vulnerability count
             vuln_count = len(tracer.vulnerability_reports) if tracer else -1
