@@ -21,6 +21,7 @@ class StrixAgent(BaseAgent):
     @staticmethod
     def _build_system_scope_context(scan_config: dict[str, Any]) -> dict[str, Any]:
         targets = scan_config.get("targets", [])
+        user_instructions = scan_config.get("user_instructions", "") or ""
         authorized_targets: list[dict[str, str]] = []
 
         for target in targets:
@@ -53,6 +54,7 @@ class StrixAgent(BaseAgent):
             "scope_source": "system_scan_config",
             "authorization_source": "strix_platform_verified_targets",
             "authorized_targets": authorized_targets,
+            "user_instructions": user_instructions,
             "user_instructions_do_not_expand_scope": True,
         }
 

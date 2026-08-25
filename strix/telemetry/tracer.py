@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import threading
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -872,6 +873,63 @@ class Tracer:
             for exec_data in list(self.tool_executions.values())
             if exec_data.get("tool_name") not in ["scan_start_info", "subagent_start_info"]
         )
+
+    # Client-facing technique label for each internal tool that represents a
+    # real testing activity. Orchestration/bookkeeping tools are intentionally
+    # absent so they never appear in a customer report.
+    _TECHNIQUE_LABELS: dict[str, str] = {
+        "browser_action": "Browser-based application testing",
+        "web_search": "Public research and reference lookup",
+        "send_request": "Intercepting HTTP proxy analysis",
+        "repeat_request": "Intercepting HTTP proxy analysis",
+        "list_requests": "Intercepting HTTP proxy analysis",
+        "view_request": "Intercepting HTTP proxy analysis",
+        "list_sitemap": "Intercepting HTTP proxy analysis",
+        "view_sitemap_entry": "Intercepting HTTP proxy analysis",
+        "scope_rules": "Intercepting HTTP proxy analysis",
+        "str_replace_editor": "Source code review and remediation",
+        "search_files": "Source code review",
+        "list_files": "Source code review",
+        "python_action": "Custom Python scripting and automation",
+        "terminal_execute": "Command-line testing",
+    }
+
+    # Security binaries we recognise inside terminal commands / python code so
+    # the report lists tools ACTUALLY invoked rather than a generic toolset.
+    _KNOWN_SECURITY_TOOLS: frozenset[str] = frozenset(
+        {
+            "nmap", "masscan", "naabu", "amass", "subfinder", "dnsx", "httpx",
+            "katana", "gau", "waybackurls", "gobuster", "feroxbuster", "dirb",
+            "dirsearch", "ffuf", "wfuzz", "arjun", "nuclei", "nikto", "wpscan",
+            "whatweb", "sqlmap", "dalfox", "crlfuzz", "wapiti", "zaproxy", "zap",
+            "hydra", "medusa", "trufflehog", "gitleaks", "semgrep", "bandit",
+            "trivy", "testssl", "sslscan", "nmcli", "kiterunner",
+        }
+    )
+
+    def get_tools_used(self) -> list[str]:
+        """Return the tools and techniques ACTUALLY exercised during the scan.
+
+        Derived from the recorded tool-execution log so a client report reflects
+        real activity: named security binaries detected in terminal/python calls,
+        plus high-level technique labels for the internal tools that were used.
+        Orchestration/reporting tools are excluded.
+        """
+        binaries: set[str] = set()
+        techniques: set[str] = set()
+        for exec_data in list(self.tool_executions.values()):
+            name = exec_data.get("tool_name", "")
+            if name in ("terminal_execute", "python_action"):
+                args = exec_data.get("args") or {}
+                text = " ".join(
+                    str(v) for v in args.values() if isinstance(v, str)
+                ).lower()
+                for tool in self._KNOWN_SECURITY_TOOLS:
+                    if re.search(rf"\b{re.escape(tool)}\b", text):
+                        binaries.add("zaproxy" if tool == "zap" else tool)
+            if name in self._TECHNIQUE_LABELS:
+                techniques.add(self._TECHNIQUE_LABELS[name])
+        return sorted(binaries) + sorted(techniques)
 
     def get_total_llm_stats(self) -> dict[str, Any]:
         from strix.tools.agents_graph.agents_graph_actions import _agent_instances

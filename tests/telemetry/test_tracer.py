@@ -378,3 +378,43 @@ def test_tracer_otel_flag_overrides_global_telemetry(monkeypatch, tmp_path) -> N
 
     events_path = tmp_path / "strix_runs" / "otel-enabled" / "events.jsonl"
     assert events_path.exists()
+
+
+def test_get_tools_used_reflects_actual_execution_log(monkeypatch, tmp_path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("STRIX_TELEMETRY", "0")
+
+    tracer = Tracer("tools-used")
+    # Real security tooling invoked via terminal/python is detected by name;
+    # internal/orchestration tools contribute only technique labels (or nothing).
+    tracer.tool_executions = {
+        1: {"tool_name": "terminal_execute", "args": {"command": "nmap -sV example.com"}},
+        2: {"tool_name": "terminal_execute", "args": {"command": "sqlmap -u https://x/login"}},
+        3: {"tool_name": "python_action", "args": {"code": "import httpx"}},
+        4: {"tool_name": "send_request", "args": {"id": "1"}},
+        5: {"tool_name": "browser_action", "args": {"action": "goto"}},
+        6: {"tool_name": "think", "args": {"thought": "maybe run nmap next"}},
+        7: {"tool_name": "create_agent", "args": {"task": "run sqlmap on login"}},
+    }
+
+    tools = tracer.get_tools_used()
+
+    # Named binaries actually invoked — and only those (the "nmap"/"sqlmap"
+    # strings inside think/create_agent must NOT leak into the report).
+    assert tools[:2] == ["nmap", "sqlmap"]
+    assert tools.count("nmap") == 1
+    assert "Browser-based application testing" in tools
+    assert "Intercepting HTTP proxy analysis" in tools
+    assert "Custom Python scripting and automation" in tools
+    # Orchestration tools produce no technique label.
+    assert not any("agent" in t.lower() for t in tools)
+
+
+def test_get_tools_used_empty_without_testing_tools(monkeypatch, tmp_path) -> None:
+    monkeypatch.chdir(tmp_path)
+    tracer = Tracer("tools-used-empty")
+    tracer.tool_executions = {
+        1: {"tool_name": "think", "args": {"thought": "planning"}},
+        2: {"tool_name": "create_todo", "args": {"title": "map surface"}},
+    }
+    assert tracer.get_tools_used() == []

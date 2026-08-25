@@ -424,6 +424,29 @@ def create_agent(
         sub_max_iter = getattr(parent_llm_config, "sub_agent_max_iterations", 150)
         sub_timeout = getattr(parent_llm_config, "sub_agent_timeout", 1800)
 
+        # Propagate the authoritative scope + operator rules-of-engagement to the
+        # sub-agent so they render in ITS system prompt. Without this, the child's
+        # system prompt has no AUTHORIZED TARGETS / user-instruction block and the
+        # only carrier of operator constraints is ignorable "background" context.
+        # Primary source: the parent LLM's live context (set on the root in
+        # execute_scan and inherited down the tree). Fallback: rebuild from the
+        # canonical scan_config on the tracer (covers standalone/sandbox paths).
+        system_prompt_context: dict[str, Any] = {}
+        parent_llm = getattr(parent_agent, "llm", None)
+        if parent_llm is not None:
+            system_prompt_context = dict(getattr(parent_llm, "_system_prompt_context", {}) or {})
+        if not system_prompt_context:
+            try:
+                from strix.telemetry.tracer import get_global_tracer
+
+                tracer = get_global_tracer()
+                if tracer and tracer.scan_config:
+                    system_prompt_context = StrixAgent._build_system_scope_context(
+                        tracer.scan_config
+                    )
+            except Exception:  # noqa: BLE001
+                system_prompt_context = {}
+
         state = AgentState(
             task=task,
             agent_name=name,
@@ -437,6 +460,7 @@ def create_agent(
             timeout=timeout,
             scan_mode=scan_mode,
             interactive=interactive,
+            system_prompt_context=system_prompt_context,
         )
 
         agent_config = {
