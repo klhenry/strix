@@ -13,8 +13,18 @@ This tool directly updates the scan report data:
 - methodology
 - technical_analysis
 - recommendations
+- scope_coverage
+- limitations
 
 All fields are REQUIRED and map directly to the final report.
+
+SCOPE-COVERAGE GATE: Before the report is generated, this tool verifies that EVERY
+platform-approved in-scope target is explicitly accounted for in scope_coverage. If any
+approved asset is missing, the call is REJECTED and you must test it (or explicitly mark it
+excluded/not_tested with a reason) before finishing. This prevents the failure mode where
+the client approves multiple applications but the report only covers one of them. Provide
+credentials/objectives through the scan's custom instructions, and record for each asset
+whether authenticated testing, unauthenticated testing, or both were performed.
 
 This must be the last tool called in the scan. It will:
 1. Verify you are the root agent
@@ -43,6 +53,8 @@ But make sure to not report the same vulnerability multiple times.
 Professional, customer-facing penetration test report rules (PDF-ready):
 - Do NOT include internal or system details: never mention local/absolute paths (e.g., "/workspace"), internal tools, agents, orchestrators, sandboxes, models, system prompts/instructions, connection/tooling issues, or tester environment details.
 - Tone and style: formal, objective, third-person, concise. No internal checklists or engineering runbooks. Content must read as a polished client deliverable.
+- Rules-of-engagement alignment: report language MUST match the approved rules of engagement. Describe validation as controlled and low-volume when that is what occurred. Do NOT use or imply aggressive-testing language (e.g., flooding, mass requests, high request volume, IP rotation, header rotation, brute forcing, denial of service) unless such activity was explicitly authorized AND actually performed. Prefer "validated with targeted, low-volume proof-of-concept requests."
+- Tooling accuracy: only reference tools and techniques ACTUALLY used within the approved scope. Do NOT enumerate a generic or aspirational toolset. An accurate "Tools and Techniques Used" list is generated automatically from the real execution log and appended to the methodology, so in your own methodology prose describe categories of activity rather than listing specific tools you did not run.
 - Structure across fields should align to standard pentest reports:
   - Executive summary: business impact, risk posture, notable criticals, remediation theme.
   - Methodology: industry-standard methods (e.g., OWASP, OSSTMM, NIST), scope, constraints—no internal execution notes.
@@ -61,6 +73,27 @@ Professional, customer-facing penetration test report rules (PDF-ready):
       </parameter>
       <parameter name="recommendations" type="string" required="true">
         <description>Prioritized, actionable remediation guidance organized by urgency (Immediate, Short-term, Medium-term). Each recommendation should provide specific technical remediation steps. Conclude with retest and validation guidance.</description>
+      </parameter>
+      <parameter name="scope_coverage" type="string" required="true">
+        <description>Per-target coverage accounting as XML. Provide ONE &lt;target&gt; block for EVERY platform-approved in-scope asset (web apps, APIs, repositories, IPs). The scan cannot finish until every approved asset is accounted for here — this prevents reporting on only some of the approved applications.
+
+Format:
+&lt;coverage&gt;
+  &lt;target&gt;
+    &lt;asset&gt;exact in-scope asset, e.g. https://staging.example.com&lt;/asset&gt;
+    &lt;status&gt;one of: tested_with_findings | tested_no_findings | excluded | not_tested&lt;/status&gt;
+    &lt;authentication&gt;one of: unauthenticated | authenticated | both | not_applicable&lt;/authentication&gt;
+    &lt;notes&gt;what was tested (e.g. login, RBAC, session handling); REQUIRED reason if status is excluded or not_tested&lt;/notes&gt;
+  &lt;/target&gt;
+&lt;/coverage&gt;
+
+Rules:
+- Every approved asset MUST have a &lt;target&gt; block. Missing assets cause the call to be rejected.
+- Set &lt;authentication&gt; to authenticated or both whenever test credentials were provided — do not report authenticated assets as unauthenticated-only.
+- Use excluded/not_tested only when an asset genuinely could not be tested, and always give the reason in &lt;notes&gt;.</description>
+      </parameter>
+      <parameter name="limitations" type="string" required="true">
+        <description>Testing constraints and limitations for the report. State what was and was not covered, any areas deferred and why, and confirm that findings were validated in a controlled, low-volume manner (do not imply aggressive or high-volume testing unless it was actually authorized and performed). Keep this client-facing and factual.</description>
       </parameter>
     </parameters>
     <returns type="Dict[str, Any]">
@@ -161,6 +194,21 @@ Implement alerting for high-risk events: repeated authorization failures, anomal
 
 Retest and validation
 Conduct a focused retest after remediation of immediate-priority items to verify the effectiveness of SSRF controls, tenant isolation enforcement, and session hardening. Validate that no bypasses exist through redirect chains, DNS rebinding, or encoding edge cases. Repeat authorization regression tests to confirm consistent enforcement across all endpoints.</parameter>
+  <parameter=scope_coverage><coverage>
+  <target>
+    <asset>https://app.acme-corp.com</asset>
+    <status>tested_with_findings</status>
+    <authentication>both</authentication>
+    <notes>Authenticated with the provided standard and admin test accounts. Covered login behavior, role-based access, admin/staff separation, session handling, and object-level access controls, plus the unauthenticated public surface.</notes>
+  </target>
+  <target>
+    <asset>https://app.acme-corp.com/api/v1/</asset>
+    <status>tested_with_findings</status>
+    <authentication>both</authentication>
+    <notes>Tested authorization and tenant isolation across order/invoice endpoints using the provided accounts; also reviewed unauthenticated access.</notes>
+  </target>
+</coverage></parameter>
+  <parameter=limitations>Testing was limited to the approved staging assets listed above. All findings were validated in a controlled, low-volume manner using targeted, manual proof-of-concept requests; no high-volume, destructive, or denial-of-service testing was performed. Rate-limit and lockout thresholds were not stress-tested. Third-party integrations and any assets outside the approved scope were excluded.</parameter>
 </function>
     </examples>
   </tool>

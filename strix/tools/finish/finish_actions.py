@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Any
 
 from strix.tools.registry import register_tool
@@ -12,6 +13,155 @@ _MAX_ATTEMPTS_BEFORE_FORCE: int = 3
 # Track agents that have already been warned about 0 findings so we allow
 # them through on the second call.
 _zero_findings_warned: set[str] = set()
+
+# Track agents already warned about targets left untested so a scan can still
+# complete (with documented limitations) on the second finish_scan call.
+_incomplete_coverage_warned: set[str] = set()
+
+_VALID_COVERAGE_STATUSES = {
+    "tested_with_findings",
+    "tested_no_findings",
+    "excluded",
+    "not_tested",
+}
+_VALID_COVERAGE_AUTH = {
+    "unauthenticated",
+    "authenticated",
+    "both",
+    "not_applicable",
+}
+
+
+def _authorized_targets(scan_config: dict[str, Any] | None) -> list[tuple[str, str]]:
+    """Extract (type, value) for every platform-verified in-scope target.
+
+    Mirrors StrixAgent._build_system_scope_context value extraction without
+    importing the agent stack into this tools module.
+    """
+    targets = (scan_config or {}).get("targets", []) or []
+    out: list[tuple[str, str]] = []
+    for target in targets:
+        ttype = target.get("type", "unknown")
+        details = target.get("details", {}) or {}
+        if ttype == "repository":
+            value = details.get("target_repo", "")
+        elif ttype == "local_code":
+            value = details.get("target_path", "")
+        elif ttype == "web_application":
+            value = details.get("target_url", "")
+        elif ttype == "ip_address":
+            value = details.get("target_ip", "")
+        else:
+            value = target.get("original", "")
+        if value:
+            out.append((ttype, value))
+    return out
+
+
+def _parse_scope_coverage(xml_str: str) -> list[dict[str, str]]:
+    if not xml_str or not xml_str.strip():
+        return []
+    entries: list[dict[str, str]] = []
+    for match in re.finditer(r"<target>(.*?)</target>", xml_str, re.DOTALL):
+        block = match.group(1)
+        entry: dict[str, str] = {}
+        for field in ("asset", "status", "authentication", "notes"):
+            field_match = re.search(rf"<{field}>(.*?)</{field}>", block, re.DOTALL)
+            if field_match:
+                entry[field] = field_match.group(1).strip()
+        if entry.get("asset"):
+            entries.append(entry)
+    return entries
+
+
+def _normalize_asset(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    for scheme in ("https://", "http://"):
+        if normalized.startswith(scheme):
+            normalized = normalized[len(scheme) :]
+            break
+    if normalized.startswith("www."):
+        normalized = normalized[4:]
+    return normalized.rstrip("/")
+
+
+def _asset_matches(target_value: str, entry_asset: str) -> bool:
+    a = _normalize_asset(target_value)
+    b = _normalize_asset(entry_asset)
+    if not a or not b:
+        return False
+    return a == b or a in b or b in a
+
+
+def _validate_coverage_structure(entries: list[dict[str, str]]) -> list[str]:
+    errors: list[str] = []
+    for entry in entries:
+        asset = entry.get("asset", "")
+        status = entry.get("status", "")
+        auth = entry.get("authentication", "")
+        if status not in _VALID_COVERAGE_STATUSES:
+            errors.append(
+                f"scope_coverage target '{asset}': status must be one of "
+                f"{sorted(_VALID_COVERAGE_STATUSES)} (got '{status}')"
+            )
+        if auth not in _VALID_COVERAGE_AUTH:
+            errors.append(
+                f"scope_coverage target '{asset}': authentication must be one of "
+                f"{sorted(_VALID_COVERAGE_AUTH)} (got '{auth}')"
+            )
+        if status in ("excluded", "not_tested") and not entry.get("notes", "").strip():
+            errors.append(
+                f"scope_coverage target '{asset}': status '{status}' requires a reason in <notes>"
+            )
+    return errors
+
+
+def _coverage_gaps(
+    entries: list[dict[str, str]], authorized: list[tuple[str, str]]
+) -> tuple[list[str], list[str]]:
+    """Return (unaccounted_target_values, not_tested_target_values)."""
+    unaccounted: list[str] = []
+    not_tested: list[str] = []
+    for _ttype, value in authorized:
+        matched = [e for e in entries if _asset_matches(value, e.get("asset", ""))]
+        if not matched:
+            unaccounted.append(value)
+        elif all(e.get("status") == "not_tested" for e in matched):
+            not_tested.append(value)
+    return unaccounted, not_tested
+
+
+def _render_coverage_markdown(entries: list[dict[str, str]], limitations: str) -> str:
+    status_labels = {
+        "tested_with_findings": "Tested — findings reported",
+        "tested_no_findings": "Tested — no findings",
+        "excluded": "Excluded from scope",
+        "not_tested": "Not tested",
+    }
+    auth_labels = {
+        "unauthenticated": "unauthenticated testing",
+        "authenticated": "authenticated testing",
+        "both": "authenticated and unauthenticated testing",
+        "not_applicable": "authentication not applicable",
+    }
+    lines = ["## Scope Coverage", ""]
+    for entry in entries:
+        asset = entry.get("asset", "")
+        status = status_labels.get(entry.get("status", ""), entry.get("status", ""))
+        auth = auth_labels.get(entry.get("authentication", ""), entry.get("authentication", ""))
+        note = entry.get("notes", "").strip()
+        line = f"- {asset}: {status} ({auth})."
+        if note:
+            line += f" {note}"
+        lines.append(line)
+    lines += ["", "## Testing Limitations", "", limitations.strip()]
+    return "\n".join(lines)
+
+
+def _render_tools_used_markdown(tools_used: list[str]) -> str:
+    lines = ["## Tools and Techniques Used", ""]
+    lines += [f"- {tool}" for tool in tools_used]
+    return "\n".join(lines)
 
 
 def _validate_root_agent(agent_state: Any) -> dict[str, Any] | None:
@@ -120,6 +270,8 @@ def finish_scan(
     methodology: str,
     technical_analysis: str,
     recommendations: str,
+    scope_coverage: str = "",
+    limitations: str = "",
     agent_state: Any = None,
 ) -> dict[str, Any]:
     validation_error = _validate_root_agent(agent_state)
@@ -140,6 +292,19 @@ def finish_scan(
         validation_errors.append("Technical analysis cannot be empty")
     if not recommendations or not recommendations.strip():
         validation_errors.append("Recommendations cannot be empty")
+    if not limitations or not limitations.strip():
+        validation_errors.append(
+            "Limitations cannot be empty — document any constraints and untested areas, "
+            "and confirm findings were validated in a controlled, low-volume manner"
+        )
+
+    coverage_entries = _parse_scope_coverage(scope_coverage)
+    if not coverage_entries:
+        validation_errors.append(
+            "scope_coverage is required — provide one <target> block per in-scope asset "
+            "with <asset>, <status>, <authentication>, and <notes>"
+        )
+    validation_errors.extend(_validate_coverage_structure(coverage_entries))
 
     if validation_errors:
         return {"success": False, "message": "Validation failed", "errors": validation_errors}
@@ -170,6 +335,68 @@ def finish_scan(
                     "[VULN_REPORT] entries.",
                 )
 
+            # ── Scope-coverage gate ──────────────────────────────────
+            # Every platform-verified in-scope target must be explicitly
+            # accounted for in scope_coverage. This catches the "only one
+            # of the approved apps was tested" failure mode before the
+            # report is generated.
+            authorized = _authorized_targets(tracer.scan_config)
+            unaccounted, not_tested = _coverage_gaps(coverage_entries, authorized)
+
+            if unaccounted:
+                logger.warning(
+                    "[FINISH_SCAN] Blocking finish — %d in-scope target(s) unaccounted "
+                    "for in scope_coverage: %s",
+                    len(unaccounted),
+                    ", ".join(unaccounted),
+                )
+                asset_lines = "\n".join(f"- {value}" for value in unaccounted)
+                return {
+                    "success": False,
+                    "error": "incomplete_scope_coverage",
+                    "message": (
+                        "Cannot finish scan: the following platform-approved in-scope "
+                        "target(s) are missing from scope_coverage. Every approved asset "
+                        "must be explicitly accounted for before the report is generated "
+                        "(the client approved these assets — they cannot be silently "
+                        "dropped):\n\n"
+                        f"{asset_lines}\n\n"
+                        "ACTION REQUIRED: Test each missing asset now (spawn dedicated "
+                        "sub-agents if needed), then add a <target> block for it to "
+                        "scope_coverage with <asset>, <status>, <authentication>, and "
+                        "<notes>. If an asset is genuinely out of scope or unreachable, "
+                        "still add its <target> block with status 'excluded' or "
+                        "'not_tested' and a clear reason in <notes>."
+                    ),
+                }
+
+            # ── Untested-target soft guard ───────────────────────────
+            # If any approved target is marked not_tested, bounce ONCE to
+            # push for coverage; allow through on retry so a scan can still
+            # complete with the limitation clearly documented in the report.
+            if not_tested and agent_id not in _incomplete_coverage_warned:
+                _incomplete_coverage_warned.add(agent_id)
+                asset_lines = "\n".join(f"- {value}" for value in not_tested)
+                logger.info(
+                    "[FINISH_SCAN] Untested-target soft guard for agent %s: %s",
+                    agent_id,
+                    ", ".join(not_tested),
+                )
+                return {
+                    "success": False,
+                    "error": "targets_not_tested",
+                    "message": (
+                        "The following approved in-scope target(s) are marked "
+                        "'not_tested':\n\n"
+                        f"{asset_lines}\n\n"
+                        "These were approved by the client and should be tested. "
+                        "Test them now (spawn dedicated sub-agents if needed) and update "
+                        "their scope_coverage status, or — if they genuinely cannot be "
+                        "tested — call finish_scan again to complete with the limitation "
+                        "documented in the report."
+                    ),
+                }
+
             # ── Zero-findings guard ──────────────────────────────────
             # On the FIRST finish_scan call with 0 findings, bounce the
             # agent back so it has a chance to call
@@ -198,9 +425,22 @@ def finish_scan(
                     ),
                 }
 
+            report_sections = [
+                methodology.strip(),
+                _render_coverage_markdown(coverage_entries, limitations),
+            ]
+            # Append the tools/techniques ACTUALLY used, derived from the
+            # execution log, so the report cannot over-claim a generic toolset.
+            try:
+                tools_used = tracer.get_tools_used()
+            except AttributeError:
+                tools_used = []
+            if tools_used:
+                report_sections.append(_render_tools_used_markdown(tools_used))
+            methodology_final = "\n\n".join(report_sections)
             tracer.update_scan_final_fields(
                 executive_summary=executive_summary.strip(),
-                methodology=methodology.strip(),
+                methodology=methodology_final,
                 technical_analysis=technical_analysis.strip(),
                 recommendations=recommendations.strip(),
             )
