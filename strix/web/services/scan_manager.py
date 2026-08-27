@@ -188,14 +188,26 @@ class ScanManager:
         req: ScanRequest = request
         self._cleanup_finished()
 
+        # A webhook sender may retry a request after a timeout even though the
+        # first request was accepted. Reuse the original run for the same
+        # external scan ID so one pentest cannot accidentally start twice.
+        existing_run_name = self._scan_id_map.get(req.scan_id)
+        if existing_run_name is not None:
+            logger.info(
+                "Duplicate webhook request for external scan %s; reusing run %s",
+                req.scan_id,
+                existing_run_name,
+            )
+            return existing_run_name
+
         if len(self._active_scans()) >= MAX_CONCURRENT_SCANS:
             msg = f"Maximum concurrent scans ({MAX_CONCURRENT_SCANS}) reached"
             raise RuntimeError(msg)
 
         scan_mode = "vuln_scan" if req.scan_type == "vulnerability_scan" else "deep"
-        target_url = str(req.target_url)
+        targets = req.resolved_targets()
 
-        run_name = self._generate_run_name([target_url])
+        run_name = self._generate_run_name(targets)
 
         webhook_meta = WebhookMeta(
             external_scan_id=req.scan_id,
@@ -205,7 +217,7 @@ class ScanManager:
         )
 
         task = asyncio.create_task(
-            self._run_scan(run_name, [target_url], scan_mode, "", webhook_meta)
+            self._run_scan(run_name, targets, scan_mode, req.instruction.strip(), webhook_meta)
         )
 
         scan_state = ScanState(
@@ -222,11 +234,14 @@ class ScanManager:
 
         self._scans[run_name] = scan_state
         self._scan_id_map[req.scan_id] = run_name
+        # The create endpoint returns run_name for backward compatibility, so
+        # status lookup must accept that identifier as well as req.scan_id.
+        self._scan_id_map[run_name] = run_name
 
         return run_name
 
     def get_webhook_scan_status(self, external_scan_id: str) -> dict[str, Any]:
-        """Get status for a scan by its external (Accountable) scan ID."""
+        """Get status by the Accountable scan ID or returned internal run name."""
         run_name = self._scan_id_map.get(external_scan_id)
 
         if run_name is None:
@@ -256,9 +271,19 @@ class ScanManager:
             }
 
         # Check if it completed (look at filesystem)
-        run_dir = Path("strix_runs") / run_name
+        run_dir = self.run_store.runs_dir / run_name
         if not run_dir.exists():
-            return {"status": "pending", "progress": 0, "error_message": None}
+            scan_failed = bool(state and state.task.done())
+            error_message = (
+                (state.last_error or "Scan failed before any events were recorded")
+                if scan_failed and state
+                else None
+            )
+            return {
+                "status": "failed" if scan_failed else "pending",
+                "progress": 0,
+                "error_message": error_message,
+            }
 
         # Parse status from events
         events_file = run_dir / "events.jsonl"
@@ -305,6 +330,9 @@ class ScanManager:
         if len(finished) > 50:
             for k in finished[:len(finished) - 50]:
                 self._scans.pop(k, None)
+                for scan_id, run_name in list(self._scan_id_map.items()):
+                    if run_name == k:
+                        self._scan_id_map.pop(scan_id, None)
 
     def _resolve_scan(self, run_name: str | None) -> ScanState | None:
         """Resolve a scan by name or return the most recent active scan."""

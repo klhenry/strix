@@ -8,18 +8,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Poetry
-RUN pip install --no-cache-dir poetry
+RUN pip install --no-cache-dir poetry==2.2.1
 
 # Copy full project so Poetry can validate all included files (e.g. README.md)
 COPY . .
 
-# Install dependencies (no dev deps, web extra only)
-RUN poetry config virtualenvs.create false \
+# Install dependencies into an application-only environment. Poetry and its
+# own dependencies remain in the system environment, which prevents a Poetry
+# dependency upgrade/downgrade from leaving mixed binary and Python modules in
+# the runtime environment (notably charset-normalizer).
+RUN poetry config virtualenvs.create true \
+    && poetry config virtualenvs.in-project true \
     && poetry install --no-interaction --no-ansi --extras web --without dev
 
+ENV VIRTUAL_ENV=/app/.venv
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
 # Install Playwright Chromium for PDF generation
-RUN pip install --no-cache-dir playwright \
-    && playwright install --with-deps chromium
+RUN pip install --no-cache-dir playwright==1.54.0 \
+    && playwright install --with-deps chromium \
+    && python -c "import nltk; from charset_normalizer import from_bytes; assert from_bytes(b'container-smoke-test')"
 
 # The web server runs scans locally (no Docker-in-Docker sandbox), so we
 # need standalone mode so that ALL tools — including create_vulnerability_report
