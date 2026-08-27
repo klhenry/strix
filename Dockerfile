@@ -1,4 +1,6 @@
-FROM python:3.13-slim
+# Playwright 1.54 supports Debian 12, but not Debian 13. Keep the distro pinned
+# so a moving python:3.13-slim tag cannot break browser dependency installation.
+FROM python:3.13-slim-bookworm
 
 WORKDIR /app
 
