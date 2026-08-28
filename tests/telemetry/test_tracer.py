@@ -403,6 +403,7 @@ def test_get_tools_used_reflects_actual_execution_log(monkeypatch, tmp_path) -> 
     # strings inside think/create_agent must NOT leak into the report).
     assert tools[:2] == ["nmap", "sqlmap"]
     assert tools.count("nmap") == 1
+    assert "httpx" not in tools  # Python library import, not the ProjectDiscovery CLI.
     assert "Browser-based application testing" in tools
     assert "Intercepting HTTP proxy analysis" in tools
     assert "Custom Python scripting and automation" in tools
@@ -418,3 +419,18 @@ def test_get_tools_used_empty_without_testing_tools(monkeypatch, tmp_path) -> No
         2: {"tool_name": "create_todo", "args": {"title": "map surface"}},
     }
     assert tracer.get_tools_used() == []
+
+
+def test_get_tools_used_retains_httpx_terminal_invocations(monkeypatch, tmp_path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("STRIX_TELEMETRY", "0")
+
+    tracer = Tracer("tools-used-httpx-cli")
+    tracer.tool_executions = {
+        1: {
+            "tool_name": "terminal_execute",
+            "args": {"command": "httpx -u https://example.test"},
+        },
+    }
+
+    assert tracer.get_tools_used() == ["httpx", "Command-line testing"]
