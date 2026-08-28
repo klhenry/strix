@@ -2,6 +2,7 @@ from typing import Any
 
 from strix.agents.base_agent import BaseAgent
 from strix.llm.config import LLMConfig
+from strix.scope import detect_auth_expectation, reconcile_instruction_targets
 
 
 class StrixAgent(BaseAgent):
@@ -23,6 +24,7 @@ class StrixAgent(BaseAgent):
         targets = scan_config.get("targets", [])
         user_instructions = scan_config.get("user_instructions", "") or ""
         authorized_targets: list[dict[str, str]] = []
+        reconcilable_target_values: list[str] = []
 
         for target in targets:
             target_type = target.get("type", "unknown")
@@ -42,6 +44,15 @@ class StrixAgent(BaseAgent):
             workspace_subdir = details.get("workspace_subdir")
             workspace_path = f"/workspace/{workspace_subdir}" if workspace_subdir else ""
 
+            repository_is_web_url = (
+                bool(value)
+                and target_type == "repository"
+                and value.lower().startswith(("http://", "https://"))
+            )
+            if value and (
+                target_type in {"web_application", "ip_address"} or repository_is_web_url
+            ):
+                reconcilable_target_values.append(value)
             authorized_targets.append(
                 {
                     "type": target_type,
@@ -50,12 +61,24 @@ class StrixAgent(BaseAgent):
                 }
             )
 
+        # Reconcile explicit operator-authored in-scope declarations against the
+        # structured scope. Only assets conservatively surfaced by reconciliation
+        # become additional authority; incidental references and exclusions in the
+        # surrounding free text do not. Authentication expectations are likewise
+        # derived only from the operator-authored rules of engagement.
+        instruction_declared_assets = reconcile_instruction_targets(
+            reconcilable_target_values,
+            user_instructions,
+        )
+        auth_expected = detect_auth_expectation(user_instructions)
+
         return {
             "scope_source": "system_scan_config",
             "authorization_source": "strix_platform_verified_targets",
             "authorized_targets": authorized_targets,
+            "instruction_declared_assets": instruction_declared_assets,
+            "auth_expected": auth_expected,
             "user_instructions": user_instructions,
-            "user_instructions_do_not_expand_scope": True,
         }
 
     async def execute_scan(self, scan_config: dict[str, Any]) -> dict[str, Any]:  # noqa: PLR0912

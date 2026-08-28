@@ -906,6 +906,10 @@ class Tracer:
             "trivy", "testssl", "sslscan", "nmcli", "kiterunner",
         }
     )
+    # Names that are also common Python libraries. Seeing these in arbitrary
+    # python_action source does not prove that the like-named CLI was executed.
+    # They remain detectable in terminal commands, where invocation is explicit.
+    _AMBIGUOUS_PYTHON_TOOL_NAMES: frozenset[str] = frozenset({"httpx"})
 
     def get_tools_used(self) -> list[str]:
         """Return the tools and techniques ACTUALLY exercised during the scan.
@@ -925,6 +929,8 @@ class Tracer:
                     str(v) for v in args.values() if isinstance(v, str)
                 ).lower()
                 for tool in self._KNOWN_SECURITY_TOOLS:
+                    if name == "python_action" and tool in self._AMBIGUOUS_PYTHON_TOOL_NAMES:
+                        continue
                     if re.search(rf"\b{re.escape(tool)}\b", text):
                         binaries.add("zaproxy" if tool == "zap" else tool)
             if name in self._TECHNIQUE_LABELS:

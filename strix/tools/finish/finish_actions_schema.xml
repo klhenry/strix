@@ -18,13 +18,19 @@ This tool directly updates the scan report data:
 
 All fields are REQUIRED and map directly to the final report.
 
-SCOPE-COVERAGE GATE: Before the report is generated, this tool verifies that EVERY
-platform-approved in-scope target is explicitly accounted for in scope_coverage. If any
-approved asset is missing, the call is REJECTED and you must test it (or explicitly mark it
-excluded/not_tested with a reason) before finishing. This prevents the failure mode where
-the client approves multiple applications but the report only covers one of them. Provide
-credentials/objectives through the scan's custom instructions, and record for each asset
-whether authenticated testing, unauthenticated testing, or both were performed.
+FINISH GATES:
+- Coverage must account exactly once for every platform-approved or platform-surfaced
+operator-declared target and no other asset. Incidental free-text references do not grant scope;
+explicit operator exclusions and narrower restrictions always win.
+- If credentials/accounts authorized for use were supplied or authenticated testing was required,
+describe credentialed work as authenticated/credentialed gray-box. Do not call a credentialed
+target or the overall engagement unauthenticated black-box, and do not claim no credentials were
+provided; those descriptions remain valid only for a distinct unauthenticated-only target or phase.
+- Authenticated coverage or an exact out-of-band blocker is required for each applicable target.
+Record a blocker in both that target's coverage notes and limitations; mentioning OTP/MFA alone is
+insufficient. Repeating finish_scan never waives this per-target authentication gate.
+
+The parameter descriptions below define the exact coverage XML, enum values, and reporting rules.
 
 This must be the last tool called in the scan. It will:
 1. Verify you are the root agent
@@ -66,7 +72,7 @@ Professional, customer-facing penetration test report rules (PDF-ready):
         <description>High-level summary for non-technical stakeholders. Include: risk posture assessment, key findings in business context, potential business impact (data exposure, compliance, reputation), and an overarching remediation theme. Write in clear, accessible language for executive leadership.</description>
       </parameter>
       <parameter name="methodology" type="string" required="true">
-        <description>Testing methodology and scope. Include: frameworks and standards followed (e.g., OWASP WSTG, PTES), engagement type and approach (black-box, gray-box), in-scope assets and target environment, categories of testing activities performed, and evidence validation standards applied.</description>
+        <description>Testing methodology and scope. Include: frameworks and standards followed (e.g., OWASP WSTG, PTES), engagement type and approach (credentialed/authenticated gray-box for targets tested with credentials or authenticated context; unauthenticated black-box only for distinct targets or phases where authenticated testing was not required), in-scope assets and target environment, categories of testing activities performed, and evidence validation standards applied.</description>
       </parameter>
       <parameter name="technical_analysis" type="string" required="true">
         <description>Consolidated overview of confirmed findings and risk patterns. Include: severity model used, a high-level summary of each finding with its severity rating, and systemic root causes or recurring themes observed across findings. Reference individual vulnerability reports for reproduction details — do not duplicate full evidence here.</description>
@@ -75,7 +81,7 @@ Professional, customer-facing penetration test report rules (PDF-ready):
         <description>Prioritized, actionable remediation guidance organized by urgency (Immediate, Short-term, Medium-term). Each recommendation should provide specific technical remediation steps. Conclude with retest and validation guidance.</description>
       </parameter>
       <parameter name="scope_coverage" type="string" required="true">
-        <description>Per-target coverage accounting as XML. Provide ONE &lt;target&gt; block for EVERY platform-approved in-scope asset (web apps, APIs, repositories, IPs). The scan cannot finish until every approved asset is accounted for here — this prevents reporting on only some of the approved applications.
+        <description>Per-target XML coverage for every platform-approved or surfaced operator-declared in-scope asset (web apps, APIs, repositories, IPs).
 
 Format:
 &lt;coverage&gt;
@@ -88,12 +94,14 @@ Format:
 &lt;/coverage&gt;
 
 Rules:
-- Every approved asset MUST have a &lt;target&gt; block. Missing assets cause the call to be rejected.
-- Set &lt;authentication&gt; to authenticated or both whenever test credentials were provided — do not report authenticated assets as unauthenticated-only.
-- Use excluded/not_tested only when an asset genuinely could not be tested, and always give the reason in &lt;notes&gt;.</description>
+- Every approved asset MUST have exactly one &lt;target&gt; block. Missing, duplicate, extra, or unrecognized asset rows cause the call to be rejected.
+- Every distinct structured URL and surfaced operator-declared URL identity requires its own block, preserving the exact scheme, port, and path; a row for a www/apex alias, different origin, the same host without the exact path, or a sibling path does not account for it.
+- Set &lt;authentication&gt; to authenticated or both whenever test credentials authorized for use were provided and usable. Never use credentials the operator forbids. If authentication was blocked, document the exact blocker both here in the affected target's &lt;notes&gt; and in limitations.
+- Use excluded if and only if the operator's rules of engagement explicitly exclude that asset, and quote or summarize that exclusion in &lt;notes&gt;. An explicitly excluded recognized target MUST use excluded and MUST NOT be tested.
+- Use not_tested for an asset that was unreachable, unattempted, deferred, or otherwise could not be tested, and always give the reason in &lt;notes&gt;.</description>
       </parameter>
       <parameter name="limitations" type="string" required="true">
-        <description>Testing constraints and limitations for the report. State what was and was not covered, any areas deferred and why, and confirm that findings were validated in a controlled, low-volume manner (do not imply aggressive or high-volume testing unless it was actually authorized and performed). Keep this client-facing and factual.</description>
+        <description>Testing constraints and limitations for the report. State what was and was not covered, any areas deferred and why, and confirm that findings were validated in a controlled, low-volume manner (do not imply aggressive or high-volume testing unless it was actually authorized and performed). If authenticated testing was blocked, state the exact blocker here and also in the affected scope_coverage target's &lt;notes&gt;. Keep this client-facing and factual.</description>
       </parameter>
     </parameters>
     <returns type="Dict[str, Any]">
@@ -121,7 +129,7 @@ Prioritize eliminating SSRF pathways and centralizing authorization enforcement 
   <parameter=methodology>The assessment was conducted in accordance with the OWASP Web Security Testing Guide (WSTG) and aligned to industry-standard penetration testing methodology.
 
 Engagement details
-- Assessment type: External penetration test (black-box with limited gray-box context)
+- Assessment type: External credentialed gray-box penetration test
 - Target environment: Production-equivalent staging
 
 Scope (in-scope assets)
@@ -199,13 +207,13 @@ Conduct a focused retest after remediation of immediate-priority items to verify
     <asset>https://app.acme-corp.com</asset>
     <status>tested_with_findings</status>
     <authentication>both</authentication>
-    <notes>Authenticated with the provided standard and admin test accounts. Covered login behavior, role-based access, admin/staff separation, session handling, and object-level access controls, plus the unauthenticated public surface.</notes>
+    <notes>Authenticated with the operator-authorized standard and admin test accounts. Covered login behavior, role-based access, admin/staff separation, session handling, and object-level access controls, plus the unauthenticated public surface.</notes>
   </target>
   <target>
     <asset>https://app.acme-corp.com/api/v1/</asset>
     <status>tested_with_findings</status>
     <authentication>both</authentication>
-    <notes>Tested authorization and tenant isolation across order/invoice endpoints using the provided accounts; also reviewed unauthenticated access.</notes>
+    <notes>Tested authorization and tenant isolation across order/invoice endpoints using the operator-authorized accounts; also reviewed unauthenticated access.</notes>
   </target>
 </coverage></parameter>
   <parameter=limitations>Testing was limited to the approved staging assets listed above. All findings were validated in a controlled, low-volume manner using targeted, manual proof-of-concept requests; no high-volume, destructive, or denial-of-service testing was performed. Rate-limit and lockout thresholds were not stress-tested. Third-party integrations and any assets outside the approved scope were excluded.</parameter>
