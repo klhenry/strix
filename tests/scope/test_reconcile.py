@@ -1103,3 +1103,86 @@ def test_routable_ip_literal_still_authorized() -> None:
     assert rc.extract_instruction_targets("In scope: test 10.20.30.40 thoroughly.") == [
         "10.20.30.40",
     ]
+
+
+# -- labeled URL declarations & bare scope-section headers ------------------
+# Real rules of engagement list each in-scope app's address under a per-app
+# "Application URL:" / "Login URL:" label, often after an intervening
+# credentials section, or beneath a bare "Targets:" / "Scope:" heading. These
+# conventions previously extracted nothing, silently dropping in-scope apps.
+
+
+def test_extract_labeled_url_survives_intervening_credentials_section() -> None:
+    # The per-app URLs appear AFTER a credentials section that resets positive
+    # scope-section tracking; the labeled-URL declaration must still be captured.
+    text = """
+In-Scope Applications
+WellReceived staging application
+SetMore staging application
+
+Primary Authorized Login Accounts
+Admin audit user: jake+anywhere-admin@accountablehq.com
+Staff audit user: jake+anywhere-staff@accountablehq.com
+
+WellReceived Access
+Application URL: https://my.staging.wellreceived.app/
+
+SetMore Access
+Application URL: https://go.staging.setmore.com/
+Login URL: https://auth.staging.setmore.com/o/login/service
+"""
+    targets = rc.extract_instruction_targets(text)
+    assert "https://my.staging.wellreceived.app/" in targets
+    assert "https://go.staging.setmore.com/" in targets
+    assert "https://auth.staging.setmore.com/o/login/service" in targets
+
+
+def test_reconcile_surfaces_setmore_named_only_in_instructions() -> None:
+    text = """
+In-Scope Applications
+SetMore staging application
+
+SetMore Access
+Application URL: https://go.staging.setmore.com/
+"""
+    missing = rc.reconcile_instruction_targets(["https://my.staging.wellreceived.app/"], text)
+    assert missing == ["https://go.staging.setmore.com/"]
+
+
+@pytest.mark.parametrize(
+    "label",
+    ["Application URL", "Login URL", "Target URL", "Base URL", "URL", "Access URL", "Endpoint"],
+)
+def test_extract_positive_url_labels_capture_target(label: str) -> None:
+    assert rc.extract_instruction_targets(f"{label}: https://go.staging.setmore.com/") == [
+        "https://go.staging.setmore.com/"
+    ]
+
+
+@pytest.mark.parametrize(
+    "label",
+    ["Reference URL", "Callback URL", "Redirect URL", "Documentation URL", "Webhook URL"],
+)
+def test_extract_reference_url_labels_never_capture_target(label: str) -> None:
+    assert rc.extract_instruction_targets(f"{label}: https://docs.vendor.test/x") == []
+
+
+@pytest.mark.parametrize("header", ["Targets", "Scope", "Assets", "URLs", "Applications", "Hosts"])
+def test_extract_bare_scope_section_headers_capture_listed_urls(header: str) -> None:
+    text = f"{header}:\nhttps://go.staging.setmore.com/\nhttps://my.staging.wellreceived.app/"
+    assert rc.extract_instruction_targets(text) == [
+        "https://go.staging.setmore.com/",
+        "https://my.staging.wellreceived.app/",
+    ]
+
+
+def test_extract_labeled_url_still_loses_to_negation_and_exclusion() -> None:
+    assert (
+        rc.extract_instruction_targets("Do not test the Application URL: https://prod.test") == []
+    )
+    assert (
+        rc.extract_instruction_targets(
+            "Out of scope:\nApplication URL: https://payments.vendor.test"
+        )
+        == []
+    )

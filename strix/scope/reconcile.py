@@ -114,6 +114,11 @@ _POSITIVE_SCOPE_SECTION_RE = re.compile(
     r"in[-\s\u2010-\u2015]?scope(?:\s+(?:applications?|apps?|assets?|hosts?|targets?))?"
     r"|authorized\s+(?:applications?|apps?|assets?|hosts?|targets?)"
     r"|targets?\s+in[-\s]?scope"
+    # Bare asset-list section headers ("Targets:", "Scope:", "Assets:", "URLs:",
+    # "Applications:"). Real rules of engagement list in-scope hosts beneath such
+    # a heading rather than embedding a scope verb in each line.
+    r"|(?:targets?|scope|assets?|urls?|hosts?|domains?|systems?|environments?"
+    r"|endpoints?|sites?|applications?|apps?|web\s+applications?)"
     r")\s*(?::|$)",
     re.IGNORECASE,
 )
@@ -249,6 +254,23 @@ _POSITIVE_SCOPE_RE = re.compile(
     r"|(?:testing|assessment|auditing|scanning)\s+is\s+authorized\s+"
     r"(?:for|on|against)"
     r")",
+    re.IGNORECASE,
+)
+# A per-target URL declaration line such as "Application URL: https://app.test",
+# "Login URL: https://auth.test", or "Target URL: https://api.test". Real rules of
+# engagement list each in-scope app's address under such a label rather than in a
+# scope-verb sentence, and those labels frequently follow an intervening
+# credentials section that resets positive-scope section tracking. The leading
+# negative lookahead keeps documentation/callback/redirect URLs (which are
+# references, not targets) from being authorized by an "... URL:" label.
+_LABELED_URL_DECL_RE = re.compile(
+    r"^(?:the\s+)?"
+    r"(?!(?:see|refer|reference|references|referenced|documentation|docs?|"
+    r"background|resource|resources|callback|redirect|redirection|webhook|"
+    r"example|examples|sample|samples|deprecated|old|previous|former|legacy|"
+    r"note|notes)\b)"
+    r"(?:[a-z][a-z0-9]*\s+){0,3}"
+    r"(?:url|uri|endpoint)s?\s*[:=]\s",
     re.IGNORECASE,
 )
 _CLAUSE_SPLIT_RE = re.compile(
@@ -852,7 +874,11 @@ def _authorized_fragments(instruction: str) -> Iterator[str]:
             # or a mixed line such as "Test A; do not test B".
             if _is_negative_scope_clause(clause):
                 continue
-            if section == "authorized" or _POSITIVE_SCOPE_RE.search(clause):
+            if (
+                section == "authorized"
+                or _POSITIVE_SCOPE_RE.search(clause)
+                or _LABELED_URL_DECL_RE.match(clause)
+            ):
                 yield clause
 
 
