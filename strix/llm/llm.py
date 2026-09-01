@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
@@ -24,6 +25,8 @@ from strix.utils.resource_paths import get_strix_resource_path
 
 litellm.drop_params = True
 litellm.modify_params = True
+
+logger = logging.getLogger(__name__)
 
 
 class LLMRequestFailedError(Exception):
@@ -177,7 +180,26 @@ class LLM:
         chunk_timeout = 120
 
         self._total_stats.requests += 1
-        response = await acompletion(**self._build_completion_args(messages), stream=True)
+        args = self._build_completion_args(messages)
+        try:
+            response = await acompletion(**args, stream=True)
+        except Exception as e:  # noqa: BLE001
+            # The installed litellm may not map the requested reasoning_effort
+            # (e.g. "xhigh"/"max" on a litellm version that predates them), which
+            # it raises during argument mapping. A single unsupported effort value
+            # must not fail the whole scan — drop it and retry once at the
+            # provider default. Any other error propagates to the retry logic.
+            if "reasoning_effort" in args and self._is_reasoning_effort_error(e):
+                logger.warning(
+                    "reasoning_effort=%s is not supported by the installed litellm; "
+                    "retrying without it. Set STRIX_REASONING_EFFORT to a supported "
+                    "value (e.g. high) to silence this.",
+                    args.get("reasoning_effort"),
+                )
+                args.pop("reasoning_effort", None)
+                response = await acompletion(**args, stream=True)
+            else:
+                raise
 
         aiter = response.__aiter__()
         while True:
@@ -324,6 +346,11 @@ class LLM:
             return completion_cost(response, model=self.config.canonical_model) or 0.0
         except Exception:  # noqa: BLE001
             return 0.0
+
+    @staticmethod
+    def _is_reasoning_effort_error(e: Exception) -> bool:
+        text = str(e).lower()
+        return "reasoning effort" in text or "reasoning_effort" in text
 
     def _should_retry(self, e: Exception) -> bool:
         code = getattr(e, "status_code", None) or getattr(
