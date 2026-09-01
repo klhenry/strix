@@ -255,6 +255,7 @@ class LLM:
         args: dict[str, Any] = {
             "model": self.config.litellm_model,
             "messages": messages,
+            "max_tokens": self.config.max_output_tokens,
             "timeout": self.config.timeout,
             "stream_options": {"include_usage": True},
         }

@@ -31,6 +31,12 @@ class LLMConfig:
         self.skills = skills or []
 
         self.timeout = timeout or int(Config.get("llm_timeout") or "300")
+        # Anthropic requires max_tokens on every request. litellm can derive a
+        # per-model default only for models it already knows; for a model absent
+        # from its map (e.g. one newer than the pinned litellm) that lookup fails
+        # and surfaces as APIConnectionError. Always send an explicit ceiling so
+        # requests do not depend on litellm knowing the model.
+        self.max_output_tokens = int(Config.get("strix_max_output_tokens") or "32000")
 
         valid_modes = ["quick", "standard", "deep", "vuln_scan"]
         self.scan_mode = scan_mode if scan_mode in valid_modes else "deep"
