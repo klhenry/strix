@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
@@ -24,6 +25,8 @@ from strix.utils.resource_paths import get_strix_resource_path
 
 litellm.drop_params = True
 litellm.modify_params = True
+
+logger = logging.getLogger(__name__)
 
 
 class LLMRequestFailedError(Exception):
@@ -177,7 +180,27 @@ class LLM:
         chunk_timeout = 120
 
         self._total_stats.requests += 1
-        response = await acompletion(**self._build_completion_args(messages), stream=True)
+        args = self._build_completion_args(messages)
+        try:
+            response = await acompletion(**args, stream=True)
+        except Exception as e:  # noqa: BLE001
+            # The installed litellm may reject the reasoning_effort it was given
+            # (an unmapped value such as "xhigh"), or translate it into a thinking
+            # parameter the model rejects (e.g. "thinking.type.enabled" on Opus 5,
+            # which needs adaptive thinking). Neither should fail the whole scan —
+            # drop reasoning_effort and retry once so the request runs at the
+            # model's default thinking. Any other error propagates to retry logic.
+            if "reasoning_effort" in args and self._is_thinking_or_effort_error(e):
+                logger.warning(
+                    "reasoning_effort=%s is not usable with the installed litellm for "
+                    "this model; retrying without it (model default thinking). "
+                    "Upgrade litellm for full effort control on newer models.",
+                    args.get("reasoning_effort"),
+                )
+                args.pop("reasoning_effort", None)
+                response = await acompletion(**args, stream=True)
+            else:
+                raise
 
         aiter = response.__aiter__()
         while True:
@@ -324,6 +347,26 @@ class LLM:
             return completion_cost(response, model=self.config.canonical_model) or 0.0
         except Exception:  # noqa: BLE001
             return 0.0
+
+    @staticmethod
+    def _is_thinking_or_effort_error(e: Exception) -> bool:
+        # litellm derives a thinking parameter from reasoning_effort. Versions
+        # that predate a model's current thinking API can send a shape the model
+        # rejects: an unmapped effort value ("Unmapped reasoning effort: xhigh"),
+        # or the deprecated "thinking.type.enabled" / budget_tokens form that
+        # Opus 5 and the 4.6+ family reject in favor of "thinking.type.adaptive"
+        # + output_config.effort. Dropping reasoning_effort removes the thinking
+        # param so the request runs at the model's default thinking behavior.
+        text = str(e).lower()
+        return any(
+            marker in text
+            for marker in (
+                "reasoning effort",
+                "reasoning_effort",
+                "thinking.type",
+                "budget_tokens",
+            )
+        )
 
     def _should_retry(self, e: Exception) -> bool:
         code = getattr(e, "status_code", None) or getattr(
