@@ -587,8 +587,18 @@ class BaseAgent(metaclass=AgentMeta):
         error_details = getattr(error, "details", None)
         self.state.add_error(error_msg)
 
+        # Surface the underlying provider error (target URL, connection/auth cause)
+        # to the standard log too — the tracer captures it, but plain deployment
+        # logs otherwise show only the exception class (e.g. "APIConnectionError"),
+        # which is not enough to diagnose a misconfigured model/base/egress.
+        if error_details:
+            logger.error("[LLM_ERROR] %s | details: %s", error_msg, error_details)
+        else:
+            logger.error("[LLM_ERROR] %s", error_msg)
+
         if not self.interactive:
-            self.state.set_completed({"success": False, "error": error_msg})
+            reported_error = f"{error_msg} ({error_details})" if error_details else error_msg
+            self.state.set_completed({"success": False, "error": reported_error})
             if tracer:
                 tracer.update_agent_status(self.state.agent_id, "failed", error_msg)
                 if error_details:
@@ -598,7 +608,7 @@ class BaseAgent(metaclass=AgentMeta):
                         {"error": error_msg, "details": error_details},
                     )
                     tracer.update_tool_execution(exec_id, "failed", {"details": error_details})
-            return {"success": False, "error": error_msg}
+            return {"success": False, "error": reported_error}
 
         self.state.enter_waiting_state(llm_failed=True)
         if tracer:
