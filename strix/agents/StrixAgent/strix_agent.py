@@ -1,3 +1,5 @@
+import os
+from pathlib import Path
 from typing import Any
 
 from strix.agents.base_agent import BaseAgent
@@ -42,7 +44,10 @@ class StrixAgent(BaseAgent):
                 value = target.get("original", "")
 
             workspace_subdir = details.get("workspace_subdir")
-            workspace_path = f"/workspace/{workspace_subdir}" if workspace_subdir else ""
+            workspace_path = (
+                str(Path(os.getenv("STRIX_WORKSPACE", "/workspace")) / workspace_subdir)
+                if workspace_subdir else ""
+            )
 
             repository_is_web_url = (
                 bool(value)
@@ -95,7 +100,8 @@ class StrixAgent(BaseAgent):
             target_type = target["type"]
             details = target["details"]
             workspace_subdir = details.get("workspace_subdir")
-            workspace_path = f"/workspace/{workspace_subdir}" if workspace_subdir else "/workspace"
+            workspace = Path(os.getenv("STRIX_WORKSPACE", "/workspace"))
+            workspace_path = str(workspace / workspace_subdir if workspace_subdir else workspace)
 
             if target_type == "repository":
                 repo_url = details["target_repo"]

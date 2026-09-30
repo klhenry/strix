@@ -126,7 +126,7 @@ THOROUGH VALIDATION MANDATE:
 MULTI-TARGET CONTEXT (IF PROVIDED):
 - Targets may include any combination of: repositories (source code), local codebases, and URLs/domains (deployed apps/APIs)
 - If multiple targets are provided in the scan configuration:
-  - Build an internal Target Map at the start: list each asset and where it is accessible (code at /workspace/<subdir>, URLs as given)
+  - Build an internal Target Map at the start: list each asset and where it is accessible (code at {{ workspace_dir }}/<subdir>, URLs as given)
   - Identify relationships across assets (e.g., routes/handlers in code ↔ endpoints in web targets; shared auth/config)
   - Plan testing per asset and coordinate findings across them (reuse secrets, endpoints, payloads)
   - Prioritize cross-correlation: use code insights to guide dynamic testing, and dynamic findings to focus code review
@@ -156,7 +156,7 @@ WHITE-BOX TESTING (code provided):
 
 COMBINED MODE (code + deployed target present):
 - Treat this as static analysis plus dynamic testing simultaneously
-- Use repository/local code at /workspace/<subdir> to accelerate and inform live testing against the URLs/domains
+- Use repository/local code at {{ workspace_dir }}/<subdir> to accelerate and inform live testing against the URLs/domains
 - Validate suspected code issues dynamically; use dynamic anomalies to prioritize code paths for review
 
 ASSESSMENT METHODOLOGY:
@@ -258,7 +258,7 @@ Remember: A single well-validated high-impact vulnerability is worth more than d
 AGENT ISOLATION & SANDBOXING:
 - All agents run in the same shared Docker container for efficiency
 - Each agent has its own: browser sessions, terminal sessions
-- All agents share the same /workspace directory and proxy history
+- All agents share the same {{ workspace_dir }} directory and proxy history
 - Agents can see each other's files and proxy traffic for better collaboration
 
 MANDATORY INITIAL PHASES:
@@ -514,7 +514,7 @@ PROGRAMMING:
 - You can install any additional tools/packages needed based on the task/context using package managers (apt, pip, npm, go install, etc.)
 
 Directories:
-- /workspace - where you should work.
+- {{ workspace_dir }} - where you should work.
 - /home/pentester/tools - Additional tool scripts
 - /home/pentester/tools/wordlists - Currently empty, but you should download wordlists here when you need.
 

@@ -1398,6 +1398,7 @@ def _check_active_agents(agent_state: Any = None) -> dict[str, Any] | None:
     try:
         from strix.tools.agents_graph.agents_graph_actions import (
             _agent_graph,
+            descendant_agent_ids,
             force_stop_all_subagents,
         )
 
@@ -1409,8 +1410,9 @@ def _check_active_agents(agent_state: Any = None) -> dict[str, Any] | None:
         active_agents = []
         stopping_agents = []
 
+        descendants = descendant_agent_ids(current_agent_id)
         for agent_id, node in _agent_graph["nodes"].items():
-            if agent_id == current_agent_id:
+            if agent_id not in descendants:
                 continue
 
             status = node.get("status", "unknown")

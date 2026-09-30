@@ -2,6 +2,7 @@ import asyncio
 import base64
 import contextlib
 import logging
+import os
 import threading
 from pathlib import Path
 from typing import Any, cast
@@ -543,7 +544,7 @@ class BrowserInstance:
             raise ValueError(f"Tab '{tab_id}' not found")
 
         if not Path(file_path).is_absolute():
-            file_path = str(Path("/workspace") / file_path)
+            file_path = str(Path(os.environ.get("STRIX_WORKSPACE", "/workspace")) / file_path)
 
         page = self.pages[tab_id]
         await page.pdf(path=file_path)

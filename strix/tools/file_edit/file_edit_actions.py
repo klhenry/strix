@@ -1,4 +1,5 @@
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any, cast
@@ -35,7 +36,7 @@ def str_replace_editor(
     try:
         path_obj = Path(path)
         if not path_obj.is_absolute():
-            path = str(Path("/workspace") / path_obj)
+            path = str(Path(os.environ.get("STRIX_WORKSPACE", "/workspace")) / path_obj)
 
         result = file_editor(
             command=command,
@@ -68,7 +69,7 @@ def list_files(
     try:
         path_obj = Path(path)
         if not path_obj.is_absolute():
-            path = str(Path("/workspace") / path_obj)
+            path = str(Path(os.environ.get("STRIX_WORKSPACE", "/workspace")) / path_obj)
             path_obj = Path(path)
 
         if not path_obj.exists():
@@ -122,7 +123,7 @@ def search_files(
     try:
         path_obj = Path(path)
         if not path_obj.is_absolute():
-            path = str(Path("/workspace") / path_obj)
+            path = str(Path(os.environ.get("STRIX_WORKSPACE", "/workspace")) / path_obj)
 
         if not Path(path).exists():
             return {"error": f"Directory not found: {path}"}

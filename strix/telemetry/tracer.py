@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import re
 import threading
 from contextvars import ContextVar
@@ -309,8 +310,8 @@ class Tracer:
 
     def get_run_dir(self) -> Path:
         if self._run_dir is None:
-            runs_dir = Path.cwd() / "strix_runs"
-            runs_dir.mkdir(exist_ok=True)
+            runs_dir = Path(os.environ.get("STRIX_RUNS_DIR", str(Path.cwd() / "strix_runs")))
+            runs_dir.mkdir(parents=True, exist_ok=True)
 
             run_dir_name = self.run_name if self.run_name else self.run_id
             self._run_dir = runs_dir / run_dir_name
@@ -624,7 +625,9 @@ class Tracer:
             source="strix.run",
         )
 
-    def save_run_data(self, mark_complete: bool = False) -> None:
+    def save_run_data(
+        self, mark_complete: bool = False, *, generate_reports: bool = False
+    ) -> None:
         try:
             run_dir = self.get_run_dir()
             if mark_complete:
@@ -770,7 +773,7 @@ class Tracer:
                     )
                 logger.info("Updated vulnerability index: %s", vuln_csv_file)
 
-            if mark_complete:
+            if mark_complete or generate_reports:
                 try:
                     from strix.reporting.html_report import generate_html_report
                     from strix.reporting.json_report import generate_json_summary

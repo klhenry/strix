@@ -22,10 +22,11 @@ CAIDO_PORT = 48080  # Fixed port inside container
 class ProxyManager:
     def __init__(self, auth_token: str | None = None):
         host = "127.0.0.1"
-        self.base_url = f"http://{host}:{CAIDO_PORT}/graphql"
+        port = int(os.environ.get("STRIX_CAIDO_PORT", str(CAIDO_PORT)))
+        self.base_url = f"http://{host}:{port}/graphql"
         self.proxies = {
-            "http": f"http://{host}:{CAIDO_PORT}",
-            "https": f"http://{host}:{CAIDO_PORT}",
+            "http": f"http://{host}:{port}",
+            "https": f"http://{host}:{port}",
         }
         self.auth_token = auth_token or os.getenv("CAIDO_API_TOKEN")
 

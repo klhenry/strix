@@ -434,3 +434,42 @@ def test_get_tools_used_retains_httpx_terminal_invocations(monkeypatch, tmp_path
     }
 
     assert tracer.get_tools_used() == ["httpx", "Command-line testing"]
+
+
+@pytest.mark.parametrize("status", ["error", "cancelled"])
+@pytest.mark.parametrize("scan_mode", ["deep", "vuln_scan"])
+def test_interrupted_scan_saves_partial_reports_without_completion(
+    monkeypatch, tmp_path, status, scan_mode
+) -> None:
+    from strix.reporting import pdf_report
+
+    monkeypatch.setenv("STRIX_RUNS_DIR", str(tmp_path))
+
+    def fake_pdf(html_path, output_path):
+        assert "Partial finding" in html_path.read_text()
+        output_path.write_bytes(b"%PDF-1.4 test")
+        return output_path
+
+    monkeypatch.setattr(pdf_report, "generate_pdf_report_sync", fake_pdf)
+    tracer = Tracer("partial")
+    tracer.set_scan_config({"targets": [], "scan_mode": scan_mode})
+    tracer.run_metadata["status"] = status
+    tracer.vulnerability_reports.append({
+        "id": "vuln-1", "title": "Partial finding", "severity": "high",
+        "timestamp": "2026-09-30T12:00:00Z", "description": "Recorded before interruption",
+    })
+    tracer.save_run_data(mark_complete=False, generate_reports=True)
+
+    run_dir = tracer.get_run_dir()
+    basename = (
+        "vulnerability_scan_report" if scan_mode == "vuln_scan" else "penetration_test_report"
+    )
+    for filename in (f"{basename}.html", f"{basename}.pdf", "report.json", "results.sarif"):
+        assert (run_dir / filename).stat().st_size > 0
+    report = json.loads((run_dir / "report.json").read_text())
+    assert report["metadata"]["status"] == status
+    assert report["vulnerabilities"][0]["title"] == "Partial finding"
+    assert tracer.run_metadata["status"] == status
+    assert not tracer._run_completed_emitted
+    events = _load_events(run_dir / "events.jsonl")
+    assert not any(e["event_type"] == "run.completed" for e in events)
