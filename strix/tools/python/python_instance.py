@@ -18,7 +18,7 @@ class PythonInstance:
 
         import os
 
-        os.chdir("/workspace")
+        os.chdir(os.environ.get("STRIX_WORKSPACE", "/workspace"))
 
         self.shell = InteractiveShell()
         self.shell.init_completer()

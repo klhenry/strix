@@ -131,7 +131,6 @@ class RunStore:
 
         if events_file.exists():
             first_line = ""
-            last_line = ""
             with events_file.open(encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
@@ -139,7 +138,6 @@ class RunStore:
                         continue
                     if not first_line:
                         first_line = line
-                    last_line = line
 
                     try:
                         evt = json.loads(line)
@@ -174,15 +172,9 @@ class RunStore:
                         status = "completed"
                         meta = evt.get("run_metadata") or {}
                         end_time = meta.get("end_time", evt.get("timestamp"))
-
-            if status != "completed" and last_line:
-                try:
-                    last_evt = json.loads(last_line)
-                    if last_evt.get("status") == "completed":
-                        status = "completed"
-                        end_time = last_evt.get("timestamp")
-                except json.JSONDecodeError:
-                    pass
+                    elif evt_type == "run.error":
+                        status = "error"
+                        end_time = evt.get("timestamp")
 
         available_reports: list[str] = []
         for fmt, names in [

@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 import time
 import uuid
@@ -28,9 +29,10 @@ class TerminalSession:
     HISTORY_LIMIT = 10_000
     PS1_END = "]$ "
 
-    def __init__(self, session_id: str, work_dir: str = "/workspace") -> None:
+    def __init__(self, session_id: str, work_dir: str | None = None) -> None:
         self.session_id = session_id
-        self.work_dir = str(Path(work_dir).resolve())
+        workspace = work_dir or os.environ.get("STRIX_WORKSPACE", "/workspace")
+        self.work_dir = str(Path(workspace).resolve())
         self._closed = False
         self._cwd = self.work_dir
 
@@ -54,7 +56,7 @@ class TerminalSession:
         return r"\[STRIX_(\d+)\]"
 
     def initialize(self) -> None:
-        self.server = libtmux.Server()
+        self.server = libtmux.Server(socket_path=os.environ.get("STRIX_TMUX_SOCKET"))
 
         session_name = f"strix-{self.session_id}-{uuid.uuid4()}"
         self.session = self.server.new_session(

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
@@ -97,13 +98,18 @@ class LLM:
             )
 
             skills_to_load = self._get_skills_to_load()
-            skill_content = load_skills(skills_to_load)
+            workspace_dir = os.getenv("STRIX_WORKSPACE", "/workspace")
+            skill_content = {
+                name: content.replace("/workspace", workspace_dir)
+                for name, content in load_skills(skills_to_load).items()
+            }
             env.globals["get_skill"] = lambda name: skill_content.get(name, "")
 
             result = env.get_template("system_prompt.jinja").render(
-                get_tools_prompt=get_tools_prompt,
+                get_tools_prompt=lambda: get_tools_prompt().replace("/workspace", workspace_dir),
                 loaded_skill_names=list(skill_content.keys()),
                 interactive=self.config.interactive,
+                workspace_dir=workspace_dir,
                 system_prompt_context=self._system_prompt_context,
                 **skill_content,
             )

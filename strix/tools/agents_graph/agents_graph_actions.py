@@ -1,4 +1,5 @@
 import logging
+import os
 import threading
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -23,11 +24,31 @@ _agent_instances: dict[str, Any] = {}
 _agent_states: dict[str, Any] = {}
 
 
+def descendant_agent_ids(root_agent_id: str | None) -> set[str]:
+    """Return only this root's descendants, never another scan's root or children."""
+    if not root_agent_id:
+        return set()
+    descendants: set[str] = set()
+    pending = [root_agent_id]
+    while pending:
+        parent_id = pending.pop()
+        for agent_id, node in list(_agent_graph["nodes"].items()):
+            if (
+                node.get("parent_id") == parent_id
+                and agent_id != root_agent_id
+                and agent_id not in descendants
+            ):
+                descendants.add(agent_id)
+                pending.append(agent_id)
+    return descendants
+
+
 def force_stop_all_subagents(root_agent_id: str | None = None) -> list[str]:
     """Force-stop all running sub-agents (excluding root). Returns list of stopped agent IDs."""
     stopped = []
+    descendants = descendant_agent_ids(root_agent_id or _root_agent_id)
     for agent_id, node in list(_agent_graph["nodes"].items()):
-        if agent_id == root_agent_id:
+        if agent_id not in descendants:
             continue
         if node.get("status") in ("running", "stopping"):
             # Try graceful cancel first
@@ -98,7 +119,7 @@ def _run_agent_in_thread(
         - Use agent_finish when complete to report back to parent
         - You are a SPECIALIST for this specific task
         - You share the same container as other agents but have your own tool server instance
-        - All agents share /workspace directory and proxy history for better collaboration
+        - All agents share {os.getenv("STRIX_WORKSPACE", "/workspace")} directory and proxy history for better collaboration
         - You can see files created by other agents and proxy traffic from previous work
         - Build upon previous work but focus on your specific delegated task
         - IMPORTANT: You have a hard time limit of {timeout_minutes} minutes.

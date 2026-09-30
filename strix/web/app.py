@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -18,10 +20,20 @@ _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 
 def create_app(strix_runs_dir: Path | None = None) -> FastAPI:
-    app = FastAPI(title="Strix Dashboard", docs_url=None, redoc_url=None)
-
     run_store = RunStore(strix_runs_dir)
     scan_manager = ScanManager(run_store)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        try:
+            yield
+        finally:
+            active = scan_manager._active_scans()
+            for state in active:
+                state.last_error = "Scan stopped because the server is shutting down"
+            await asyncio.gather(*(scan_manager.stop_scan(s.run_name) for s in active))
+
+    app = FastAPI(title="Strix Dashboard", docs_url=None, redoc_url=None, lifespan=lifespan)
 
     templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 

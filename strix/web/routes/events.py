@@ -40,7 +40,7 @@ async def stream_events(request: Request, run_name: str) -> StreamingResponse:
             if file_size > offset:
                 with events_path.open(encoding="utf-8") as f:
                     f.seek(offset)
-                    for line in f:
+                    for line in iter(f.readline, ""):
                         line = line.strip()
                         if not line:
                             continue
@@ -49,7 +49,7 @@ async def stream_events(request: Request, run_name: str) -> StreamingResponse:
                             evt_type = evt.get("event_type", "unknown")
                             yield f"event: {evt_type}\ndata: {line}\n\n"
 
-                            if evt_type == "run.completed":
+                            if evt_type in {"run.completed", "run.error"}:
                                 done = True
                                 break
                         except json.JSONDecodeError:

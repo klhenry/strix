@@ -874,7 +874,9 @@ def test_inactive_agent_wave_resets_force_stop_attempt_counter(monkeypatch) -> N
     monkeypatch.setattr(
         ag,
         "_agent_graph",
-        {"nodes": {"child": {"status": "running", "name": "child", "task": "work"}}},
+        {"nodes": {"child": {
+            "status": "running", "name": "child", "task": "work", "parent_id": state.agent_id,
+        }}},
     )
     first = fa._check_active_agents(state)
     assert first is not None
@@ -889,6 +891,7 @@ def test_inactive_agent_wave_resets_force_stop_attempt_counter(monkeypatch) -> N
         "status": "running",
         "name": "next-child",
         "task": "more work",
+        "parent_id": state.agent_id,
     }
     next_wave = fa._check_active_agents(state)
     assert next_wave is not None

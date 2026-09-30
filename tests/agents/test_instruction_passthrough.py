@@ -419,3 +419,36 @@ def test_create_agent_falls_back_to_tracer_scan_config(monkeypatch, clean_agent_
     child = ag._agent_instances[result["agent_id"]]
     assert child.llm_config.system_prompt_context.get("user_instructions") == instructions
     assert "do not submit any forms" in child.llm.system_prompt
+
+
+@pytest.mark.asyncio
+async def test_isolated_workspace_used_in_prompts_and_target_paths(monkeypatch, tmp_path) -> None:
+    from unittest.mock import AsyncMock
+
+    workspace = str(tmp_path / "isolated-scan")
+    monkeypatch.setenv("STRIX_WORKSPACE", workspace)
+    config = _scan_config()
+    context = StrixAgent._build_system_scope_context(config)
+    targets = {target["type"]: target for target in context["authorized_targets"]}
+    assert targets["repository"]["workspace_path"] == f"{workspace}/app"
+    assert targets["local_code"]["workspace_path"] == f"{workspace}/api"
+
+    # Both the root and a fresh child render the worker's workspace, including
+    # tool examples and any loaded skill instructions.
+    for prompt_context in (context, {}):
+        llm = LLM(
+            LLMConfig(model_name=TEST_MODEL, system_prompt_context=prompt_context,
+                      skills=["tooling/semgrep"]),
+            agent_name="StrixAgent",
+        )
+        assert f"{workspace} - where you should work" in llm.system_prompt
+        assert "/workspace" not in llm.system_prompt
+
+    agent = StrixAgent.__new__(StrixAgent)
+    agent.llm = llm
+    agent.agent_loop = AsyncMock(return_value={})
+    await agent.execute_scan(config)
+    task = agent.agent_loop.call_args.kwargs["task"]
+    assert f"available at: {workspace}/app" in task
+    assert f"available at: {workspace}/api" in task
+    assert "/workspace" not in task
