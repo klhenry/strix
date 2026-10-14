@@ -1,0 +1,23 @@
+name: Container build
+
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - pyproject.toml
+      - poetry.lock
+      - strix/**
+      - .github/workflows/container-build.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and verify the standalone runtime
+        run: docker build --tag strix-runtime:ci .
