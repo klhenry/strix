@@ -34,7 +34,7 @@ RUN case "$(uname -m)" in \
       *) exit 1 ;; \
     esac \
     && curl -fsSL "https://caido.download/releases/v0.48.0/caido-cli-v0.48.0-linux-${CAIDO_ARCH}.tar.gz" -o /tmp/caido.tar.gz \
-    && tar -xzf /tmp/caido.tar.gz -C /usr/local/bin caido-cli \
+    && tar -xzf /tmp/caido.tar.gz -C /usr/local/bin ./caido-cli \
     && chmod +x /usr/local/bin/caido-cli \
     && rm /tmp/caido.tar.gz
 
