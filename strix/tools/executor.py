@@ -197,8 +197,9 @@ def _check_error_result(result: Any) -> tuple[bool, Any]:
     is_error = False
     error_payload: Any = None
 
-    if (isinstance(result, dict) and "error" in result) or (
-        isinstance(result, str) and result.strip().lower().startswith("error:")
+    if (isinstance(result, dict) and ("error" in result or result.get("success") is False)) or (
+        isinstance(result, str)
+        and result.strip().lower().startswith(("error:", "error executing "))
     ):
         is_error = True
         error_payload = result

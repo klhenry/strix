@@ -353,7 +353,9 @@ def test_events_write_locks_are_scoped_by_events_file(monkeypatch, tmp_path) -> 
     assert lock_a_from_one is not lock_b
 
 
-def test_tracer_skips_jsonl_when_telemetry_disabled(monkeypatch, tmp_path) -> None:
+def test_tracer_keeps_run_data_but_skips_diagnostics_when_telemetry_disabled(
+    monkeypatch, tmp_path
+) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("STRIX_TELEMETRY", "0")
 
@@ -363,7 +365,10 @@ def test_tracer_skips_jsonl_when_telemetry_disabled(monkeypatch, tmp_path) -> No
     tracer.save_run_data(mark_complete=True)
 
     events_path = tmp_path / "strix_runs" / "telemetry-disabled" / "events.jsonl"
-    assert not events_path.exists()
+    events = _load_events(events_path)
+    assert {event["event_type"] for event in events} == {"run.started", "run.completed"}
+    assert tracer._otel_tracer is None
+    assert tracer._remote_export_enabled is False
 
 
 def test_tracer_otel_flag_overrides_global_telemetry(monkeypatch, tmp_path) -> None:
@@ -473,3 +478,29 @@ def test_interrupted_scan_saves_partial_reports_without_completion(
     assert not tracer._run_completed_emitted
     events = _load_events(run_dir / "events.jsonl")
     assert not any(e["event_type"] == "run.completed" for e in events)
+
+
+def test_cleanup_does_not_turn_unfinished_scan_into_success(monkeypatch, tmp_path) -> None:
+    from unittest.mock import MagicMock
+
+    monkeypatch.chdir(tmp_path)
+    tracer = Tracer("unfinished")
+    tracer.save_run_data = MagicMock()
+    tracer.cleanup()
+    tracer.save_run_data.assert_called_once_with(mark_complete=False, generate_reports=True)
+
+
+def test_incomplete_report_explains_failure_and_preserves_findings(monkeypatch, tmp_path) -> None:
+    from strix.reporting.models import ScanReport
+
+    monkeypatch.chdir(tmp_path)
+    tracer = Tracer("partial")
+    tracer.run_metadata.update(status="error", error="Iteration budget exhausted")
+    tracer.vulnerability_reports.append({
+        "id": "vuln-0001", "title": "Observed missing CSP", "severity": "low", "timestamp": "now"
+    })
+    report = ScanReport.from_tracer(tracer)
+    assert report.metadata.status == "error"
+    assert "Iteration budget exhausted" in report.executive_summary
+    assert "incomplete" in report.executive_summary
+    assert report.vulnerabilities[0].title == "Observed missing CSP"

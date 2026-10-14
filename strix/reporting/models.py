@@ -171,11 +171,19 @@ class ScanReport(BaseModel):
         vulns.sort(key=lambda v: severity_order.get(v.severity.lower(), 5))
 
         scan_results = tracer.scan_results or {}
+        executive_summary = scan_results.get("executive_summary", "")
+        if not executive_summary and metadata.status == "error":
+            reason = tracer.run_metadata.get("error") or "The scan did not complete."
+            executive_summary = (
+                f"Assessment incomplete: {reason}\n\n"
+                "Any findings below are partial results. No conclusion about the security "
+                "of untested assets can be drawn from this run."
+            )
 
         return cls(
             metadata=metadata,
             vulnerabilities=vulns,
-            executive_summary=scan_results.get("executive_summary", ""),
+            executive_summary=executive_summary,
             methodology=scan_results.get("methodology", ""),
             technical_analysis=scan_results.get("technical_analysis", ""),
             recommendations=scan_results.get("recommendations", ""),
