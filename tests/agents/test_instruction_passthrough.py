@@ -452,3 +452,26 @@ async def test_isolated_workspace_used_in_prompts_and_target_paths(monkeypatch, 
     assert f"available at: {workspace}/app" in task
     assert f"available at: {workspace}/api" in task
     assert "/workspace" not in task
+
+
+def test_vulnerability_scan_prompt_has_no_conflicting_pentest_mandates() -> None:
+    llm = LLM(LLMConfig(model_name=TEST_MODEL, scan_mode="vuln_scan"), agent_name="StrixAgent")
+    prompt = llm.system_prompt
+    assert "VULNERABILITY SCAN WORKFLOW" in prompt
+    assert "create_vulnerability_report" in prompt
+    assert "scope_coverage" in prompt
+    assert "low and informational" in prompt
+    assert "Do NOT create subagents" in prompt
+    assert "ALWAYS spray payloads" not in prompt
+    assert "Always spray payloads" not in prompt
+    assert "Independent verification through subagent" not in prompt
+    assert "MUST perform BOTH static AND dynamic analysis" not in prompt
+    assert "HIGH-IMPACT VULNERABILITY PRIORITIES" not in prompt
+    assert "<multi_agent_system>" not in prompt
+
+
+def test_pentest_prompt_retains_validation_workflow() -> None:
+    llm = LLM(LLMConfig(model_name=TEST_MODEL, scan_mode="deep"), agent_name="StrixAgent")
+    assert "HIGH-IMPACT VULNERABILITY PRIORITIES" in llm.system_prompt
+    assert "<multi_agent_system>" in llm.system_prompt
+    assert "VULNERABILITY SCAN WORKFLOW" not in llm.system_prompt

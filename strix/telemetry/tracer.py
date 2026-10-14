@@ -43,6 +43,18 @@ _OTEL_BOOTSTRAP_LOCK = threading.Lock()
 _OTEL_BOOTSTRAPPED = False
 _OTEL_REMOTE_ENABLED = False
 
+# These records are the dashboard's database and the webhook's findings source,
+# independently of optional diagnostic telemetry and remote export.
+_RUN_DATA_EVENTS = frozenset({
+    "run.started",
+    "run.configured",
+    "run.completed",
+    "run.error",
+    "finding.created",
+    "finding.reviewed",
+})
+
+
 def get_global_tracer() -> Optional["Tracer"]:
     tracer = _tracer_var.get()
     if tracer is not None:
@@ -208,7 +220,7 @@ class Tracer:
         source: str = "strix.tracer",
         include_run_metadata: bool = False,
     ) -> None:
-        if not self._telemetry_enabled:
+        if not self._telemetry_enabled and event_type not in _RUN_DATA_EVENTS:
             return
 
         enriched_actor = self._enrich_actor(actor)
@@ -293,9 +305,6 @@ class Tracer:
         self._emit_run_started_event()
 
     def _emit_run_started_event(self) -> None:
-        if not self._telemetry_enabled:
-            return
-
         self._emit_event(
             "run.started",
             payload={
@@ -991,4 +1000,14 @@ class Tracer:
         return self.interrupted_content.pop(agent_id, None)
 
     def cleanup(self) -> None:
-        self.save_run_data(mark_complete=True)
+        # Shutdown and user cancellation are not evidence of a completed scan.
+        completed = bool((self.scan_results or {}).get("scan_completed"))
+        if not completed and self.run_metadata.get("status") != "error":
+            self.end_time = datetime.now(UTC).isoformat()
+            error = "Scan stopped before finish_scan produced a final report"
+            self.run_metadata.update(status="error", end_time=self.end_time, error=error)
+            self._emit_event("run.error", payload={"error": error}, status="error")
+        self.save_run_data(
+            mark_complete=completed and self.run_metadata.get("status") != "error",
+            generate_reports=True,
+        )

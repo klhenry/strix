@@ -174,7 +174,17 @@ class BaseAgent(metaclass=AgentMeta):
 
             if self.state.should_stop():
                 if not self.interactive:
-                    return self.state.final_result or {}
+                    if self.state.final_result is not None:
+                        return self.state.final_result
+                    error = (
+                        f"Agent reached its iteration limit ({self.state.max_iterations}) "
+                        "without completing its required finish tool"
+                        if self.state.has_reached_max_iterations()
+                        else "Agent stopped before completing its required finish tool"
+                    )
+                    if tracer:
+                        tracer.update_agent_status(self.state.agent_id, "failed", error)
+                    return {"success": False, "error": error}
                 await self._enter_waiting_state(tracer)
                 continue
 

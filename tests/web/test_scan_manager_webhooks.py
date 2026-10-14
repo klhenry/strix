@@ -153,6 +153,13 @@ async def running_scan_harness(
     tick = asyncio.Event()
     release = asyncio.Event()
     tracer = MagicMock()
+    tracer.scan_results = {
+        "scan_completed": True,
+        "executive_summary": "No vulnerabilities identified in the tested surface.",
+        "methodology": "Reviewed response headers.",
+        "technical_analysis": "Observed the configured security headers.",
+        "recommendations": "Continue periodic assessments.",
+    }
     callbacks = MagicMock()
 
     async def execute_scan(_config: Any) -> dict[str, bool]:
@@ -338,3 +345,181 @@ async def test_watchdog_keeps_scan_running_before_deadline(
     assert harness["callbacks"].call_args.args[1]["status"] == "in_progress"
     harness["release"].set()
     await asyncio.wait_for(state.task, timeout=5)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("result", [{}, None, {"success": False, "error": "budget exhausted"}])
+async def test_unfinished_agent_cannot_produce_successful_blank_report(
+    running_scan_harness: dict[str, Any],
+    result: Any,
+) -> None:
+    harness = running_scan_harness
+    agent = importlib.import_module("strix.agents.StrixAgent").StrixAgent.return_value
+    agent.execute_scan = AsyncMock(return_value=result)
+    manager = harness["manager"]
+    run_name = await manager.start_webhook_scan(_request(scan_type="vulnerability_scan"))
+    await asyncio.wait_for(manager._scans[run_name].task, timeout=5)
+
+    assert manager._scans[run_name].last_error
+    assert harness["callbacks"].call_args.args[1]["status"] == "failed"
+    harness["tracer"].save_run_data.assert_called_once_with(
+        mark_complete=False, generate_reports=True
+    )
+    manager._send_completion_callback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("final_fields", [None, {}, {"scan_completed": True}])
+async def test_success_without_finish_scan_report_is_failure(
+    running_scan_harness: dict[str, Any],
+    final_fields: Any,
+) -> None:
+    harness = running_scan_harness
+    harness["tracer"].scan_results = final_fields
+    manager = harness["manager"]
+    run_name = await manager.start_webhook_scan(_request(scan_type="vulnerability_scan"))
+    await asyncio.wait_for(harness["started"].wait(), timeout=5)
+    harness["release"].set()
+    await asyncio.wait_for(manager._scans[run_name].task, timeout=5)
+
+    assert "final report" in manager._scans[run_name].last_error
+    assert harness["callbacks"].call_args.args[1]["status"] == "failed"
+    manager._send_completion_callback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pdf", [None, b"", b"%PDF-test"])
+@pytest.mark.parametrize("upload_result", [False, True])
+async def test_completion_requires_nonempty_pdf_and_successful_upload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    pdf: bytes | None,
+    upload_result: bool,
+) -> None:
+    from strix.web.services.scan_manager import WebhookMeta
+
+    manager = ScanManager(RunStore(tmp_path))
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    if pdf is not None:
+        (run_dir / "vulnerability_scan_report.pdf").write_bytes(pdf)
+    upload = MagicMock(return_value=upload_result)
+    callback = MagicMock()
+    monkeypatch.setattr("strix.web.services.webhook.upload_pdf", upload)
+    monkeypatch.setattr("strix.web.services.webhook.post_callback", callback)
+    meta = WebhookMeta(
+        "external", "https://callback.example", "https://upload.example", "vulnerability_scan"
+    )
+
+    if pdf and upload_result:
+        await manager._send_completion_callback("run", meta)
+        assert callback.call_args.args[1]["status"] == "completed"
+        assert callback.call_args.args[1]["pdf_uploaded"] is True
+    else:
+        with pytest.raises(RuntimeError, match="PDF report"):
+            await manager._send_completion_callback("run", meta)
+        callback.assert_not_called()
+    assert upload.call_count == bool(pdf)
+
+
+@pytest.mark.asyncio
+async def test_report_delivery_failure_sends_failed_callback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    manager = ScanManager(RunStore(tmp_path))
+    worker = MagicMock(run=AsyncMock(return_value={"error": None}))
+    monkeypatch.setattr("strix.web.services.scan_manager.ScanWorker", lambda: worker)
+    callback = MagicMock()
+    monkeypatch.setattr("strix.web.services.webhook.post_callback", callback)
+
+    run_name = await manager.start_webhook_scan(_request(scan_type="vulnerability_scan"))
+    await asyncio.wait_for(manager._scans[run_name].task, timeout=5)
+
+    callback.assert_called_once()
+    payload = callback.call_args.args[1]
+    assert payload["status"] == "failed"
+    assert payload["pdf_uploaded"] is False
+    assert "report delivery failed" in payload["error_message"]
+    status = manager.get_webhook_scan_status(run_name)
+    assert status["status"] == "callback_failed"
+    assert status["error_message"] == payload["error_message"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["upload", "callback"])
+async def test_cancellation_during_delivery_preserves_one_terminal_status(  # noqa: PLR0915
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, phase: str
+) -> None:
+    import json
+    import threading
+
+    manager = ScanManager(RunStore(tmp_path))
+    upload_started = threading.Event()
+    upload_release = threading.Event()
+    callback_started = threading.Event()
+    callback_release = threading.Event()
+
+    async def complete(request):
+        run_dir = tmp_path / request["run_name"]
+        run_dir.mkdir()
+        (run_dir / "vulnerability_scan_report.pdf").write_bytes(b"%PDF-test")
+        (run_dir / "events.jsonl").write_text(json.dumps({"event_type": "run.completed"}) + "\n")
+        return {"error": None}
+
+    def upload(*_args):
+        upload_started.set()
+        assert upload_release.wait(5)
+        return True
+
+    def callback(*_args):
+        callback_started.set()
+        assert callback_release.wait(5)
+
+    worker = MagicMock(run=AsyncMock(side_effect=complete))
+    callbacks = MagicMock(side_effect=callback)
+    monkeypatch.setattr("strix.web.services.scan_manager.ScanWorker", lambda: worker)
+    monkeypatch.setattr("strix.web.services.webhook.upload_pdf", upload)
+    monkeypatch.setattr("strix.web.services.webhook.post_callback", callbacks)
+    run_name = await manager.start_webhook_scan(_request(scan_type="vulnerability_scan"))
+    state = manager._scans[run_name]
+    stop_task = None
+    try:
+        assert await asyncio.to_thread(upload_started.wait, 5)
+        if phase == "callback":
+            upload_release.set()
+            assert await asyncio.to_thread(callback_started.wait, 5)
+            # Once the final POST starts, stopping cannot retract its outcome.
+            assert await manager.stop_scan(run_name) is False
+        else:
+            stop_task = asyncio.create_task(manager.stop_scan(run_name))
+            assert await asyncio.to_thread(callback_started.wait, 5)
+
+        # Repeated cancellation must not abandon or duplicate the terminal POST.
+        state.task.cancel()
+        await asyncio.sleep(0)
+        state.task.cancel()
+        await asyncio.sleep(0)
+        assert not state.task.done()
+        callback_release.set()
+        if stop_task:
+            assert await asyncio.wait_for(stop_task, 5)
+        await asyncio.wait_for(state.task, 5)
+
+        callbacks.assert_called_once()
+        expected = "failed" if phase == "upload" else "completed"
+        assert callbacks.call_args.args[1]["status"] == expected
+        assert manager.get_webhook_scan_status(run_name)["status"] == expected
+        assert manager.run_store.get_run(run_name).summary.status == (
+            "error" if phase == "upload" else "completed"
+        )
+        events = [
+            json.loads(line)
+            for line in (tmp_path / run_name / "events.jsonl").read_text().splitlines()
+        ]
+        assert sum(event["event_type"] == "run.error" for event in events) == (phase == "upload")
+    finally:
+        upload_release.set()
+        callback_release.set()
+        await asyncio.gather(
+            state.task, *([stop_task] if stop_task else []), return_exceptions=True
+        )
