@@ -21,7 +21,8 @@ def test_provider_packages_are_regular_dependencies(package: str) -> None:
     project = _pyproject()["project"]
     assert isinstance(project, dict)
     assert any(req.startswith(package) for req in project["dependencies"])
-    assert "optional-dependencies" not in project
+    for requirements in project.get("optional-dependencies", {}).values():
+        assert not any(req.startswith(package) for req in requirements)
 
 
 @pytest.mark.parametrize(
