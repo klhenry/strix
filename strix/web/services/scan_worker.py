@@ -14,6 +14,8 @@ from multiprocessing.reduction import ForkingPickler
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+import psutil
+
 
 if TYPE_CHECKING:
     from multiprocessing.connection import Connection
@@ -39,6 +41,7 @@ class ScanWorker:
         self._commands: asyncio.Queue[bytes | None] = asyncio.Queue(MAX_PENDING_COMMANDS)
         self._sender: asyncio.Task[None] | None = None
         self._closing = False
+        self._paused_children: list[psutil.Process] = []
 
     def send(self, command: str, **payload: Any) -> bool:
         if (
@@ -77,7 +80,11 @@ class ScanWorker:
             return False
         try:
             os.killpg(self.process.pid, signal.SIGSTOP)
-        except ProcessLookupError:
+            self._paused_children = psutil.Process(self.process.pid).children(recursive=True)
+            for child in self._paused_children:
+                with contextlib.suppress(psutil.Error):
+                    child.send_signal(signal.SIGSTOP)
+        except (ProcessLookupError, psutil.Error):
             return False
         self.paused = True
         return True
@@ -87,13 +94,17 @@ class ScanWorker:
             return False
         try:
             os.killpg(self.process.pid, signal.SIGCONT)
+            for child in self._paused_children:
+                with contextlib.suppress(psutil.Error):
+                    child.send_signal(signal.SIGCONT)
+            self._paused_children = []
         except ProcessLookupError:
             return False
         self.paused = False
         return True
 
     async def run(self, request: dict[str, Any]) -> dict[str, Any]:
-        self.runtime_dir = tempfile.TemporaryDirectory(prefix="strix-", dir="/tmp")
+        self.runtime_dir = tempfile.TemporaryDirectory(prefix="strix-")
         request = {**request, "runtime_dir": self.runtime_dir.name}
         ctx = multiprocessing.get_context("spawn")
         self.connection, child = ctx.Pipe()
@@ -154,8 +165,16 @@ class ScanWorker:
             # bounded grace period to save partial reports before hard cleanup.
             deadline = asyncio.get_running_loop().time() + STOP_GRACE_SECONDS
             sent_cancel = False
+            descendants: dict[int, psutil.Process] = {}
             while self.process.is_alive() and asyncio.get_running_loop().time() < deadline:
                 self._receive()
+                with contextlib.suppress(psutil.Error):
+                    descendants.update(
+                        {
+                            child.pid: child
+                            for child in psutil.Process(self.process.pid).children(recursive=True)
+                        }
+                    )
                 if not sent_cancel and self.ready:
                     self._commands.put_nowait(
                         bytes(
@@ -167,6 +186,10 @@ class ScanWorker:
             if self.process.is_alive():
                 self.process.kill()
             await asyncio.to_thread(self.process.join)
+            # SDK shell/browser subprocesses may own separate process groups.
+            for child in descendants.values():
+                with contextlib.suppress(psutil.Error):
+                    child.kill()
             # Also reap subprocesses left by browser/proxy/tool execution.
             if self.ready:
                 with contextlib.suppress(ProcessLookupError):

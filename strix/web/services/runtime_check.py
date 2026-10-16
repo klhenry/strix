@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import os
 import shutil
 
 from playwright.async_api import async_playwright
@@ -41,6 +42,36 @@ async def _smoke_test() -> None:
         await page.goto("about:blank")
         assert await page.evaluate("1+1") == 2
         await browser.close()
+
+    from strix.accountable.runtime import register_railway_backend
+    from strix.runtime import session_manager
+
+    register_railway_backend()
+    os.environ["STRIX_RUNTIME_BACKEND"] = "railway"
+    ids = ["runtime-smoke-a", "runtime-smoke-b"]
+    bundles = []
+    try:
+        for scan_id in ids:
+            bundle = await session_manager.create_or_reuse(scan_id, image="local", local_sources=[])
+            bundles.append(bundle)
+            await asyncio.wait_for(bundle["caido_client"].get(), 60)
+            result = await bundle["session"].exec("printf strix-ready", timeout=10)
+            if not result.ok() or result.stdout != b"strix-ready":
+                raise RuntimeError("SDK shell smoke check failed")
+            browser = await bundle["session"].exec(
+                "agent-browser open about:blank && agent-browser close", timeout=45
+            )
+            if not browser.ok():
+                raise RuntimeError(
+                    f"SDK browser smoke check failed: {browser.stderr.decode(errors='replace')}"
+                )
+        roots = [bundle["session"].state.manifest.root for bundle in bundles]
+        ports = [(await bundle["session"].resolve_exposed_port(48080)).port for bundle in bundles]
+        if len(set(roots)) != 2 or len(set(ports)) != 2:
+            raise RuntimeError("Scan runtimes share a workspace or proxy")
+    finally:
+        for scan_id in ids:
+            await session_manager.cleanup(scan_id)
 
 
 if __name__ == "__main__":
