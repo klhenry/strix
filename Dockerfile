@@ -8,8 +8,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates openssl bash git ripgrep jq nmap dnsutils netcat-openbsd procps \
     chromium fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
-RUN mkdir -p /app/certs && openssl req -x509 -newkey rsa:2048 -nodes \
-    -keyout /app/certs/ca.key -out /app/certs/ca.crt -days 3650 \
+RUN mkdir -p /app/certs && openssl ecparam -name prime256v1 -genkey -noout -out /app/certs/ca.key \
+    && openssl req -x509 -new -key /app/certs/ca.key -out /app/certs/ca.crt -days 3650 \
     -subj "/CN=Accountable Scan Proxy" -addext "basicConstraints=critical,CA:TRUE" \
     && openssl pkcs12 -export -out /app/certs/ca.p12 -inkey /app/certs/ca.key \
        -in /app/certs/ca.crt -passout pass: \

@@ -12,6 +12,7 @@ import contextlib
 import json
 import os
 import socket
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -118,13 +119,14 @@ async def railway_backend(
     )
     # Swap only the SDK session implementation, retaining its state and wrapper.
     assert isinstance(session._inner.state, UnixLocalSandboxSessionState)
-    session._inner = RailwaySession(state=session._inner.state)
+    inner = RailwaySession(state=session._inner.state)
+    session._inner = inner
     workspace = Path(session.state.manifest.root)
     for name in (".tmp", ".browser", ".screenshots"):
         (workspace / name).mkdir(parents=True, exist_ok=True)
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
-        session._inner.proxy_port = sock.getsockname()[1]
+        inner.proxy_port = sock.getsockname()[1]
     try:
         cert_args = (
             ["--import-ca-cert", os.environ["STRIX_PROXY_CA_P12"], "--import-ca-cert-pass", ""]
@@ -136,7 +138,7 @@ async def railway_backend(
         client.proxy = await asyncio.create_subprocess_exec(
             "caido-cli",
             "--listen",
-            f"127.0.0.1:{session._inner.proxy_port}",
+            f"127.0.0.1:{inner.proxy_port}",
             "--data-path",
             str(workspace / ".proxy"),
             "--allow-guests",
@@ -154,7 +156,7 @@ async def railway_backend(
                 {"query": "mutation { loginAsGuest { token { accessToken } } }"}
             ).encode()
             request = urllib.request.Request(
-                f"http://127.0.0.1:{session._inner.proxy_port}/graphql",
+                f"http://127.0.0.1:{inner.proxy_port}/graphql",
                 data=body,
                 headers={"Content-Type": "application/json"},
             )
@@ -169,19 +171,18 @@ async def railway_backend(
                         .get("token", {})
                         .get("accessToken")
                     )
-            except Exception:
+            except (OSError, ValueError, urllib.error.URLError):
                 return False
 
         for _ in range(40):
             if client.proxy.returncode is not None:
-                raise RuntimeError(
-                    f"Caido exited ({client.proxy.returncode}): {proxy_log.read_text(errors='replace')[-3000:]}"
-                )
+                detail = proxy_log.read_text(errors="replace")[-3000:]
+                raise RuntimeError(f"Caido exited ({client.proxy.returncode}): {detail}")  # noqa: TRY301
             if await asyncio.to_thread(probe):
                 break
             await asyncio.sleep(0.5)
         else:
-            raise RuntimeError(
+            raise RuntimeError(  # noqa: TRY301
                 f"Caido startup timed out: {proxy_log.read_text(errors='replace')[-3000:]}"
             )
     except BaseException:
