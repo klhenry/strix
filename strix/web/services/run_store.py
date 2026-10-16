@@ -189,6 +189,15 @@ class RunStore:
                         status = "error"
                         end_time = evt.get("timestamp")
 
+        # Upstream findings can be revised or deleted; the current index owns counts.
+        findings = self._read_findings(run_dir)
+        vuln_count = len(findings)
+        severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+        for finding in findings:
+            severity = str(finding.get("severity", "info")).lower()
+            if severity in severity_counts:
+                severity_counts[severity] += 1
+
         available_reports: list[str] = []
         for fmt, names in [
             (
@@ -217,6 +226,16 @@ class RunStore:
         )
 
     def _read_findings(self, run_dir: Path) -> list[dict[str, Any]]:
+        index_path = run_dir / "vulnerabilities.json"
+        if index_path.exists():
+            data = json.loads(index_path.read_text(encoding="utf-8"))
+            if not isinstance(data, list):
+                raise ValueError("Vulnerability index must contain a list")
+            current = [finding for finding in data if isinstance(finding, dict)]
+            return sorted(
+                current,
+                key=lambda value: SEVERITY_ORDER.get(str(value.get("severity", "info")).lower(), 5),
+            )
         findings: list[dict[str, Any]] = []
         events_file = run_dir / "events.jsonl"
         if not events_file.exists():
