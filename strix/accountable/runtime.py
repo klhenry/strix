@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import json
 import os
+import re
 import socket
 import urllib.error
 import urllib.request
@@ -68,11 +69,11 @@ class RailwaySession(UnixLocalSandboxSession):
         return env, cwd
 
     def _map(self, value: Any) -> str:
-        return (
-            str(value)
-            .replace("/workspace", str(self.state.manifest.root))
-            .replace("http://127.0.0.1:48080", f"http://127.0.0.1:{self.proxy_port}")
-        )
+        return re.sub(
+            r"(?<![A-Za-z0-9_./:-])/workspace(?=/|[^A-Za-z0-9_.-]|$)",
+            lambda _match: str(self.state.manifest.root),
+            str(value),
+        ).replace("http://127.0.0.1:48080", f"http://127.0.0.1:{self.proxy_port}")
 
     async def _exec_internal(self, *command: Any, **kwargs: Any) -> Any:
         return await super()._exec_internal(*(self._map(p) for p in command), **kwargs)

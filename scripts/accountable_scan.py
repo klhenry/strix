@@ -1,3 +1,4 @@
+# ruff: noqa: INP001, T201
 """Run one authorized Accountable assessment without an app callback.
 
 Credentials belong in a private instruction file, never command arguments.
