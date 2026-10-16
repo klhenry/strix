@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
+import shutil
+import tempfile
+import zipfile
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 
 from strix.web.auth import require_api_key
 from strix.web.models.api_v1 import (
@@ -70,3 +78,45 @@ async def create_assessment(request: Request, body: AssessmentRequest) -> ScanAc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return ScanAcceptedResponse(external_scan_id=run_name)
+
+
+@router.get("/scans/{scan_id}/evidence", dependencies=[Depends(require_api_key)])
+async def scan_evidence(request: Request, scan_id: str) -> FileResponse:
+    """Authenticated export for verification; includes private SDK conversations."""
+    store = request.app.state.run_store
+    base = store.runs_dir.resolve()
+    run_dir = (base / scan_id).resolve()
+    if run_dir.parent != base or not run_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Scan not found")
+    if request.app.state.scan_manager.is_scan_active(scan_id):
+        raise HTTPException(status_code=409, detail="Wait for the assessment to finish")
+    temp_dir = Path(tempfile.mkdtemp(prefix="strix-evidence-"))
+    archive_path = temp_dir / "evidence.zip"
+
+    def write_archive() -> None:
+        with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
+            for name in (
+                "run.json",
+                "report.json",
+                "vulnerabilities.json",
+                "coverage.json",
+                "events.jsonl",
+                ".state/agents.json",
+                ".state/agents.db",
+            ):
+                source = (run_dir / name).resolve()
+                if source.is_relative_to(run_dir) and source.is_file():
+                    archive.write(source, name)
+        archive_path.chmod(0o600)
+
+    try:
+        await asyncio.to_thread(write_archive)
+    except BaseException:
+        shutil.rmtree(temp_dir)
+        raise
+    return FileResponse(
+        archive_path,
+        media_type="application/zip",
+        filename=f"{scan_id}-evidence.zip",
+        background=BackgroundTask(shutil.rmtree, temp_dir),
+    )
