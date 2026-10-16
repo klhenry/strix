@@ -43,15 +43,9 @@
 
   <h2 class="sub-heading">2.2 Methodology</h2>
   {% if report.methodology %}
-  <div class="finding-text">{{ report.methodology | e }}</div>
+  <div class="finding-text">{{ report.methodology | markdown }}</div>
   {% else %}
-  <p>This penetration test followed industry-standard frameworks:</p>
-  <ul style="margin:8px 0 16px 20px;font-size:0.875rem;line-height:1.8;">
-    <li>OWASP Testing Guide v4.2 &mdash; web application and API security testing</li>
-    <li>PTES (Penetration Testing Execution Standard) &mdash; engagement structure</li>
-    <li>NIST SP 800-115 &mdash; Technical Guide to Information Security Testing</li>
-    <li>CVSS v3.1 &mdash; vulnerability severity scoring</li>
-  </ul>
+  <p>No completed testing methodology is available. See the assessment limitations.</p>
   {% endif %}
 
   <h2 class="sub-heading">2.3 Testing Parameters</h2>
@@ -158,12 +152,12 @@
     </tbody>
   </table>
   {% else %}
-  <p>No remediation actions required. All tests passed.</p>
+  <p>No vulnerability remediation items were filed. This is limited to the tested scope and does not establish that untested areas are secure.</p>
   {% endif %}
 
   {% if report.recommendations %}
   <h2 class="sub-heading">Recommendations</h2>
-  <div class="finding-text">{{ report.recommendations | e }}</div>
+  <div class="finding-text">{{ report.recommendations | markdown }}</div>
   {% endif %}
 </div>
 
@@ -179,16 +173,11 @@
   <h1 class="section-heading" id="testing-tools">6. Testing Tools &amp; Techniques</h1>
   <div class="section-divider"></div>
 
-  <table class="report-table">
-    <thead><tr><th>Phase</th><th>Tools</th><th>Purpose</th></tr></thead>
-    <tbody>
-      <tr><td><strong>Reconnaissance</strong></td><td>Nmap, Subfinder, DNS enumeration</td><td>Service discovery, port scanning, attack surface mapping</td></tr>
-      <tr><td><strong>Web App Testing</strong></td><td>Caido, Nuclei, custom scripts</td><td>OWASP Top 10, authentication testing, session analysis</td></tr>
-      <tr><td><strong>API Testing</strong></td><td>Custom scripts, fuzzing tools</td><td>Endpoint discovery, input validation, authorization testing</td></tr>
-      <tr><td><strong>Code Analysis</strong></td><td>Semgrep, manual review</td><td>Static analysis, pattern matching, vulnerability identification</td></tr>
-      <tr><td><strong>Exploitation</strong></td><td>SQLmap, custom PoC scripts</td><td>Vulnerability validation, impact demonstration</td></tr>
-    </tbody>
-  </table>
+  {% if report.tools_used %}
+  <ul class="actual-tools">{% for tool in report.tools_used %}<li>{{ tool }}</li>{% endfor %}</ul>
+  {% else %}
+  <p>No testing techniques were recorded for this run. Refer to the methodology and limitations.</p>
+  {% endif %}
 </div>
 {% endif %}
 

@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from markdown_it import MarkdownIt
+from markupsafe import Markup
 
 from strix.reporting.evidence import collect_evidence, encode_evidence_base64
 from strix.reporting.svg_charts import cvss_gauge, severity_bar_chart
@@ -33,6 +35,9 @@ def generate_html_report(
         autoescape=select_autoescape(enabled_extensions=("html", "jinja"), default_for_string=True),
     )
 
+    renderer = MarkdownIt("commonmark", {"html": False}).enable("table")
+    # Raw HTML is disabled and markdown-it rejects unsafe link protocols.
+    env.filters["markdown"] = lambda value: Markup(renderer.render(str(value or "")))  # noqa: S704
     template = env.get_template("report.html.jinja")
 
     # Read CSS for inline embedding

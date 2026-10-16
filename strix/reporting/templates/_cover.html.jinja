@@ -16,6 +16,7 @@
     <div>Test Period: <strong>{{ report.metadata.start_time[:10] }} &ndash; {{ report.metadata.end_time[:10] }}</strong></div>
     {% endif %}
     <div>Report ID: <strong>{{ report.metadata.run_id | upper }}</strong></div>
+    <div>Status: <strong>{{ report.metadata.status | upper }}</strong></div>
     <div>Classification: <strong>CONFIDENTIAL</strong></div>
     <div>Prepared By: <strong>Accountable HQ</strong></div>
   </div>

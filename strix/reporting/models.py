@@ -53,6 +53,13 @@ class VulnerabilityReport(BaseModel):
     cve: str | None = None
     cwe: str | None = None
     code_locations: list[CodeLocation] = Field(default_factory=list)
+    evidence: str = ""
+    confidence: str = ""
+    confidence_rationale: str = ""
+    counterevidence: str = ""
+    assumptions: str = ""
+    severity_change_conditions: str = ""
+    finding_class: str = "dynamic"
     evidence_images: list[str] = Field(default_factory=list)
 
     @classmethod
@@ -83,6 +90,13 @@ class VulnerabilityReport(BaseModel):
             cve=data.get("cve"),
             cwe=data.get("cwe"),
             code_locations=parsed_locs,
+            evidence=data.get("evidence") or "",
+            confidence=data.get("confidence") or "",
+            confidence_rationale=data.get("confidence_rationale") or "",
+            counterevidence=data.get("counterevidence") or "",
+            assumptions=data.get("assumptions") or "",
+            severity_change_conditions=data.get("severity_change_conditions") or "",
+            finding_class=data.get("finding_class") or "dynamic",
         )
 
 
@@ -129,6 +143,7 @@ class ScanReport(BaseModel):
     methodology: str = ""
     technical_analysis: str = ""
     recommendations: str = ""
+    tools_used: list[str] = Field(default_factory=list)
 
     @property
     def severity_counts(self) -> dict[str, int]:
@@ -184,4 +199,5 @@ class ScanReport(BaseModel):
             methodology=scan_results.get("methodology", ""),
             technical_analysis=scan_results.get("technical_analysis", ""),
             recommendations=scan_results.get("recommendations", ""),
+            tools_used=getattr(tracer, "get_tools_used", list)(),
         )
