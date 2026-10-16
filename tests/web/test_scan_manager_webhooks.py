@@ -531,3 +531,37 @@ async def test_legacy_app_preset_reaches_worker_and_retry_is_idempotent(manager_
     assert "Authenticate using the private authorized account" in captured["instruction"]
     assert await manager.start_webhook_scan(req) == name
     assert manager.instruction_presets.consume(req) == ""
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "https://app.example.com/?evaluation=private-marker&next=/employee/dashboard",
+        "https://app.example.com/login#private-fragment",
+        "https://user:password@app.example.com:8443/a%2Fb",
+        "https://[::1]/?key=value",
+    ],
+)
+async def test_webhook_identifier_is_url_safe_and_status_route_is_reachable(
+    manager_with_blocked_scan, target
+):
+    import re
+
+    from fastapi.testclient import TestClient
+
+    from strix.web.app import create_app
+
+    manager, _captured = manager_with_blocked_scan
+    name = await manager.start_webhook_scan(_request(target_url=target, target_urls=[]))
+    assert re.fullmatch(r"[a-z0-9_-]+", name)
+    assert not any(secret in name for secret in ["private-marker", "private-fragment", "password"])
+    app = create_app(manager.run_store.runs_dir)
+    app.state.scan_manager = manager
+    app.dependency_overrides.clear()
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("API_KEY", "fixture-key")
+        response = TestClient(app).get(
+            f"/api/v1/scans/{name}/status", headers={"Authorization": "Bearer fixture-key"}
+        )
+    assert response.status_code == 200
+    assert response.json()["status"] == "in_progress"
