@@ -42,3 +42,31 @@ For a CLI comparison without an app callback, send an authenticated
 `POST /api/v1/assessments` with `target_urls`, `instruction`, `model`, and
 `scan_mode`. Poll `/api/v1/scans/{external_scan_id}/status` using the same API key.
 The existing `/api/v1/scans` callback contract is unchanged.
+
+## Model evaluation (2026-10-16)
+
+All three requested OpenRouter models completed the same initial deep assessment
+with the same three-host scope, employee login and $6 scan budget. Saved SDK
+conversations confirmed protected-dashboard access for every model. Private
+reports and evidence are retained outside this public repository.
+
+| Model | Duration | Scan-record LLM cost | Review outcome |
+| --- | --- | --- | --- |
+| GLM 5.3 | 13m 58s | $1.46 | Completed; its principal finding was not substantiated as written. |
+| DeepSeek V4.1 Flash | 50m 26s | $1.77 | Selected for stronger discovery and authenticated coverage; three findings supported after triage. |
+| Muse Spark Open | 4m 50s | $5.93 | Completed quickly; no confirmed findings and less depth before budget wind-down. |
+
+These are scan-record costs, not a reconciled provider invoice. Eight raw
+DeepSeek findings do not mean eight verified vulnerabilities: five require
+further validation or lack demonstrated unauthorized impact. GLM and DeepSeek
+received the same live scope/evidence reminder. Review copies remove unrelated
+customer details and signed access tokens, and explain reviewer dispositions.
+
+The evaluation exposed a live-instruction delivery gap: operator comments must
+reach every active SDK agent, including waiting children, rather than only the
+root. Default Accountable operating instructions now explicitly constrain tenant
+access, persistent changes and external canaries, and distinguish observations
+from demonstrated exploitation. These are model instructions, not a network
+security boundary; deployments still require authorized scope and review of
+significant findings. Long reports also now retain print margins and running
+confidentiality headers/page numbers on continuation pages.

@@ -222,7 +222,7 @@ def build_scope_context(scan_config: dict[str, Any]) -> dict[str, Any]:
     return {
         "scope_source": "user_scan_config",
         **(
-            {"accountable_rules": scan_config.get("user_instructions", "")}
+            {"accountable": True, "accountable_rules": scan_config.get("user_instructions", "")}
             if scan_config.get("accountable")
             else {}
         ),

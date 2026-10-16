@@ -510,12 +510,38 @@ code { font-family: inherit; }
 
 @page {
     size: A4;
+    margin: 18mm 0 16mm;
+    @top-center {
+        content: "Accountable  |  CONFIDENTIAL";
+        background: #1a2332;
+        color: #ffffff;
+        font-family: Arial, sans-serif;
+        font-size: 9px;
+        letter-spacing: 1px;
+        vertical-align: middle;
+    }
+    @bottom-center {
+        content: "Accountable HQ | accountablehq.com  -  " counter(page) " / " counter(pages);
+        color: #64748b;
+        font-family: Arial, sans-serif;
+        font-size: 9px;
+        vertical-align: middle;
+    }
+}
+
+@page :first {
     margin: 0;
+    @top-center { content: none; }
+    @bottom-center { content: none; }
 }
 
 @media print {
     body { font-size: 11pt; margin: 0; padding: 0; }
-    .cover-page { min-height: 100vh; page-break-after: always; }
+    .cover-page { height: 297mm; min-height: 0; page-break-after: always; }
+    .page-header, .page-footer { display: none; }
+    .page-content { padding-bottom: 0; }
+    h1, h2, h3, h4 { break-after: avoid; page-break-after: avoid; }
+    p { orphans: 3; widows: 3; }
     .page-break { page-break-before: always; }
     .report-table { page-break-inside: avoid; }
     .finding-card { page-break-inside: avoid; }

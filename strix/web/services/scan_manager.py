@@ -398,12 +398,16 @@ class ScanManager:
         state = state or self._get_active_scan()
         if state is None or state.agent is None:
             return
+        from strix.core.agents import ACTIVE_STATUSES
+
         coordinator = state.agent
-        root = next((aid for aid, parent in coordinator.parent_of.items() if parent is None), None)
-        if root:
+        recipients = [
+            aid for aid, status in coordinator.statuses.items() if status in ACTIVE_STATUSES
+        ]
+        for agent_id in recipients:
             delivery = asyncio.create_task(
                 coordinator.send(
-                    root,
+                    agent_id,
                     {
                         "from": "user",
                         "type": "instruction",
