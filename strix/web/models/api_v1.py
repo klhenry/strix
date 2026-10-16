@@ -94,3 +94,12 @@ class ScanStatusResponse(BaseModel):
     status: Literal["pending", "in_progress", "completed", "failed", "callback_failed"]
     progress: int = 0
     error_message: str | None = None
+
+
+class AssessmentRequest(BaseModel):
+    """Authenticated CLI assessment without webhook delivery."""
+
+    target_urls: list[HttpUrl] = Field(min_length=1)
+    instruction: str = ""
+    model: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_./:-]{0,199}$")
+    scan_mode: Literal["quick", "standard", "deep", "vuln_scan"] = "deep"

@@ -101,6 +101,7 @@ class ScanManager:
         targets: list[str],
         scan_mode: str = "deep",
         instruction: str = "",
+        model: str | None = None,
     ) -> str:
         self._cleanup_finished()
         if len(self._active_scans()) >= MAX_CONCURRENT_SCANS:
@@ -113,7 +114,9 @@ class ScanManager:
             task=task,
             run_name=run_name,
             scan_mode=scan_mode,
+            model=model,
         )
+        self._scan_id_map[run_name] = run_name
         return run_name
 
     async def stop_scan(self, run_name: str | None = None) -> bool:

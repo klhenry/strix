@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from strix.web.auth import require_api_key
 from strix.web.models.api_v1 import (
+    AssessmentRequest,
     ScanAcceptedResponse,
     ScanRequest,
     ScanStatusResponse,
@@ -50,3 +51,22 @@ async def scan_status(request: Request, scan_id: str) -> ScanStatusResponse:
         progress=result.get("progress", 0),
         error_message=result.get("error_message"),
     )
+
+
+@router.post(
+    "/assessments",
+    response_model=ScanAcceptedResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def create_assessment(request: Request, body: AssessmentRequest) -> ScanAcceptedResponse:
+    """Run an authenticated CLI assessment; artifacts remain in the scanner."""
+    try:
+        run_name = await request.app.state.scan_manager.start_scan(
+            targets=list(dict.fromkeys(str(url) for url in body.target_urls)),
+            instruction=body.instruction,
+            scan_mode=body.scan_mode,
+            model=body.model,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return ScanAcceptedResponse(external_scan_id=run_name)

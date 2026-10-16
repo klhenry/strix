@@ -36,3 +36,9 @@ variables. Benchmark requests must use identical authorized scope, instructions,
 scan mode and budget, and must retain run records, coverage, findings and PDF output.
 Select a model using verified coverage, reproducibility, report accuracy and
 completion reliability, with cost and duration as secondary comparisons.
+
+
+For a CLI comparison without an app callback, send an authenticated
+`POST /api/v1/assessments` with `target_urls`, `instruction`, `model`, and
+`scan_mode`. Poll `/api/v1/scans/{external_scan_id}/status` using the same API key.
+The existing `/api/v1/scans` callback contract is unchanged.
