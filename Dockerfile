@@ -30,13 +30,17 @@ COPY . .
 COPY strix/tools/proxy/caido_api.py /opt/strix-python/caido_api.py
 ENV PYTHONPATH=/app:/opt/strix-python
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
-ENV AGENT_BROWSER_ARGS="--no-sandbox,--disable-dev-shm-usage,--no-first-run"
+ENV AGENT_BROWSER_USER_AGENT="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+ENV AGENT_BROWSER_ARGS="--no-sandbox,--disable-dev-shm-usage,--no-first-run,--disable-blink-features=AutomationControlled,--lang=en-US"
 ENV STRIX_PROXY_CA_P12=/app/certs/ca.p12
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 ENV STRIX_RUNTIME_BACKEND=railway
 ENV STRIX_TELEMETRY=0
 ENV OPENAI_AGENTS_DISABLE_TRACING=1
+RUN printf '%s\n' 'export PATH="/app/.venv/bin:/usr/local/bin:$PATH"' \
+    'export PYTHONPATH="/app:/opt/strix-python${PYTHONPATH:+:$PYTHONPATH}"' \
+    > /etc/profile.d/strix-runtime.sh
 RUN python -m strix.web.services.runtime_check
 ENV PORT=8080
 EXPOSE 8080

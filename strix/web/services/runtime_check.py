@@ -58,6 +58,15 @@ async def _smoke_test() -> None:
             result = await bundle["session"].exec("printf strix-ready", timeout=10)
             if not result.ok() or result.stdout != b"strix-ready":
                 raise RuntimeError("SDK shell smoke check failed")
+            python = await bundle["session"].exec(
+                "bash",
+                "-lc",
+                "python3 -c 'import requests, caido_sdk_client; print(2)'",
+                shell=False,
+                timeout=30,
+            )
+            if not python.ok() or python.stdout.strip() != b"2":
+                raise RuntimeError("SDK Python/login-shell smoke check failed")
             browser = await bundle["session"].exec(
                 "agent-browser open about:blank && agent-browser close", timeout=45
             )
