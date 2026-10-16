@@ -91,3 +91,19 @@ revoked with authenticated `DELETE /api/v1/instruction-presets/{preset_id}`.
 They never return private instructions. Register after deployment, because a
 restart intentionally clears unused presets. Operator-message SSE events also
 omit the private instruction text.
+
+## Operator console access
+
+When `API_KEY` is configured, the scanner console, scan controls, events and
+report routes require that same key. Existing app API clients continue using
+`Authorization: Bearer ...`. Browser console users can sign in over HTTPS with
+username `operator` and the API key as the password. Browser control requests
+must originate from the same host; cross-origin or missing-origin Basic-auth
+writes are rejected. Authenticated responses are marked private/no-store.
+`/health` remains public for deployment checks. Starting a server on a public
+bind address without a configured key is refused; keyless local development
+remains limited to the default loopback bind.
+
+Web scan identifiers use a sanitized hostname and a random suffix. Target paths,
+queries, fragments and credentials never enter identifiers; the original target
+URL is retained for scope and exact preset matching.

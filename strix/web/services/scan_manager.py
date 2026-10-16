@@ -383,7 +383,7 @@ class ScanManager:
         target = urlsplit(targets[0])
         label = target.hostname or target.path
         target_slug = re.sub(r"[^a-z0-9_-]+", "-", label.lower()).strip("-")[:30] or "scan"
-        return f"{target_slug}_{uuid4().hex[:4]}"
+        return f"{target_slug}_{uuid4().hex[:12]}"
 
     def _estimate_progress(self, state: ScanState) -> int:
         """Estimate scan progress as a percentage."""

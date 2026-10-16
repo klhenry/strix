@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from strix.web.auth import protect_operator_console
 from strix.web.services.run_store import RunStore
 from strix.web.services.scan_manager import ScanManager
 
@@ -38,6 +39,7 @@ def create_app(strix_runs_dir: Path | None = None) -> FastAPI:
             await asyncio.gather(*(scan_manager.stop_scan(s.run_name) for s in active))
 
     app = FastAPI(title="Strix Dashboard", docs_url=None, redoc_url=None, lifespan=lifespan)
+    app.middleware("http")(protect_operator_console)
 
     templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
@@ -107,6 +109,8 @@ def run_server(
     os.environ.setdefault("STRIX_RUNTIME_BACKEND", "railway")
 
     _load_strix_config()
+    if host not in {"localhost", "127.0.0.1", "::1"} and not os.environ.get("API_KEY"):
+        raise RuntimeError("API_KEY is required when exposing the scanner beyond localhost")
     port = int(os.environ.get("PORT", str(port)))
     app = create_app(strix_runs_dir)
     print(f"\n  Strix Dashboard → http://{host}:{port}\n")  # noqa: T201
