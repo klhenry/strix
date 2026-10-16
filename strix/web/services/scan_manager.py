@@ -6,9 +6,11 @@ import asyncio
 import contextlib
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from strix.web.services.instruction_presets import InstructionPresets
@@ -378,8 +380,9 @@ class ScanManager:
         return self._get_active_scan()
 
     def _generate_run_name(self, targets: list[str]) -> str:
-        target_slug = targets[0].replace("https://", "").replace("http://", "")
-        target_slug = target_slug.replace("/", "").replace(".", "-")[:30]
+        target = urlsplit(targets[0])
+        label = target.hostname or target.path
+        target_slug = re.sub(r"[^a-z0-9_-]+", "-", label.lower()).strip("-")[:30] or "scan"
         return f"{target_slug}_{uuid4().hex[:4]}"
 
     def _estimate_progress(self, state: ScanState) -> int:
