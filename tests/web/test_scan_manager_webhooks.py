@@ -510,3 +510,24 @@ async def test_cancellation_during_delivery_preserves_one_terminal_status(  # no
         await asyncio.gather(
             state.task, *([stop_task] if stop_task else []), return_exceptions=True
         )
+
+
+async def test_legacy_app_preset_reaches_worker_and_retry_is_idempotent(manager_with_blocked_scan):
+    from strix.web.models.api_v1 import InstructionPresetRequest
+
+    manager, captured = manager_with_blocked_scan
+    req = _request(
+        target_url="https://app.example.com/?evaluation=nonce", target_urls=[], instruction=""
+    )
+    manager.instruction_presets.register(
+        InstructionPresetRequest(
+            target_url=req.target_url,
+            callback_origin="https://app.example.com",
+            instruction="Authenticate using the private authorized account.",
+        )
+    )
+    name = await manager.start_webhook_scan(req)
+    await asyncio.sleep(0)
+    assert "Authenticate using the private authorized account" in captured["instruction"]
+    assert await manager.start_webhook_scan(req) == name
+    assert manager.instruction_presets.consume(req) == ""

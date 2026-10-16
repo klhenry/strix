@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from strix.web.services.instruction_presets import InstructionPresets
 from strix.web.services.scan_worker import ScanWorker
 
 
@@ -62,6 +63,7 @@ class ScanManager:
         self._scans: dict[str, ScanState] = {}
         self._messages: set[asyncio.Task[Any]] = set()
         self._scan_id_map: dict[str, str] = {}  # external scan_id -> internal run_name
+        self.instruction_presets = InstructionPresets()
 
     # ── Properties (backward-compatible with dashboard routes) ──
 
@@ -197,7 +199,7 @@ class ScanManager:
         if state.tracer:
             state.tracer._emit_event(
                 "user.comment",
-                payload={"message": message},
+                payload={"message": "Private operator instructions delivered"},
                 status="delivered",
                 source="strix.web",
             )
@@ -229,6 +231,10 @@ class ScanManager:
 
         scan_mode = "vuln_scan" if req.scan_type == "vulnerability_scan" else "deep"
         targets = req.resolved_targets()
+        instruction = req.instruction.strip()
+        preset = self.instruction_presets.consume(req)
+        if preset:
+            instruction = "\n\n".join(filter(None, [instruction, preset]))
 
         run_name = self._generate_run_name(targets)
 
@@ -240,7 +246,7 @@ class ScanManager:
         )
 
         task = asyncio.create_task(
-            self._run_scan(run_name, targets, scan_mode, req.instruction.strip(), webhook_meta)
+            self._run_scan(run_name, targets, scan_mode, instruction, webhook_meta)
         )
 
         scan_state = ScanState(

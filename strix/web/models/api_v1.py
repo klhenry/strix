@@ -103,3 +103,30 @@ class AssessmentRequest(BaseModel):
     instruction: str = ""
     model: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_./:-]{0,199}$")
     scan_mode: Literal["quick", "standard", "deep", "vuln_scan"] = "deep"
+
+
+class InstructionPresetRequest(BaseModel):
+    """One-use instructions for a legacy app request that cannot send notes."""
+
+    target_url: HttpUrl
+    callback_origin: HttpUrl
+    scan_type: Literal["vulnerability_scan", "penetration_test"] = "penetration_test"
+    instruction: str = Field(min_length=1, max_length=65536, repr=False)
+    expires_in_seconds: int = Field(default=900, ge=60, le=1800)
+
+    @field_validator("callback_origin")
+    @classmethod
+    def require_https_origin(cls, value: HttpUrl) -> HttpUrl:
+        parsed = urlparse(str(value))
+        if (
+            parsed.scheme != "https"
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+            or parsed.username
+            or parsed.password
+        ):
+            raise ValueError(
+                "callback_origin must be an HTTPS origin without credentials or a path"
+            )
+        return value

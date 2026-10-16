@@ -70,3 +70,24 @@ from demonstrated exploitation. These are model instructions, not a network
 security boundary; deployments still require authorized scope and review of
 significant findings. Long reports also now retain print margins and running
 confidentiality headers/page numbers on continuation pages.
+
+## Private instructions with the legacy app caller
+
+The current Accountable app API client sends scan identifiers, targets and
+callback/upload URLs, but does not forward the form's notes. Authenticated app
+runs therefore need an operator instruction preset until that caller supports
+`instruction` directly.
+
+Using the scanner API key, register `POST /api/v1/instruction-presets` with an
+exact `target_url`, an HTTPS `callback_origin`, `scan_type`, private `instruction`
+and `expires_in_seconds` (60-1800, default 900). Use a unique, harmless query
+marker in the target URL for a specific requested test. The preset applies to
+one matching single-target app request only; different query markers, extra
+targets, callback origins or scan types cannot consume it. It is consumed after
+capacity/idempotency checks, before the worker starts, so authentication coverage
+gates see the instructions from the beginning. An idempotent request retry reuses
+the same scan. Presets are memory-only, bounded, expire automatically and can be
+revoked with authenticated `DELETE /api/v1/instruction-presets/{preset_id}`.
+They never return private instructions. Register after deployment, because a
+restart intentionally clears unused presets. Operator-message SSE events also
+omit the private instruction text.

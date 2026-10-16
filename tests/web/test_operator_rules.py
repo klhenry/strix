@@ -1,6 +1,7 @@
 """Operator restrictions reach every active worker, including waiting children."""
 
 import asyncio
+from unittest.mock import MagicMock
 
 from jinja2 import Environment, FileSystemLoader
 
@@ -21,7 +22,12 @@ async def test_operator_comment_reaches_active_children_only(tmp_path):
     manager = ScanManager(RunStore(tmp_path))
     state = ScanState(task=asyncio.current_task(), run_name="test", scan_mode="deep")
     state.agent = coordinator
-    manager._inject_user_message("Stop testing downloads; only the dashboard is authorized.", state)
+    state.tracer = MagicMock()
+    manager._scans["test"] = state
+    assert manager.send_comment("Stop testing downloads; only the dashboard is authorized.", "test")
+    assert state.tracer._emit_event.call_args.kwargs["payload"] == {
+        "message": "Private operator instructions delivered"
+    }
     await asyncio.gather(*manager._messages)
     for agent_id in ["root", "child"]:
         message = coordinator.runtimes[agent_id].mailbox[0]

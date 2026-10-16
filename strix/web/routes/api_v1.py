@@ -15,6 +15,7 @@ from starlette.background import BackgroundTask
 from strix.web.auth import require_api_key
 from strix.web.models.api_v1 import (
     AssessmentRequest,
+    InstructionPresetRequest,
     ScanAcceptedResponse,
     ScanRequest,
     ScanStatusResponse,
@@ -22,6 +23,24 @@ from strix.web.models.api_v1 import (
 
 
 router = APIRouter(prefix="/api/v1", tags=["api_v1"])
+
+
+@router.post("/instruction-presets", dependencies=[Depends(require_api_key)])
+async def register_instruction_preset(
+    request: Request, body: InstructionPresetRequest
+) -> dict[str, str | int]:
+    """Attach private instructions to exactly one matching legacy app request."""
+    try:
+        identifier = request.app.state.scan_manager.instruction_presets.register(body)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"preset_id": identifier, "expires_in_seconds": body.expires_in_seconds}
+
+
+@router.delete("/instruction-presets/{identifier}", dependencies=[Depends(require_api_key)])
+async def revoke_instruction_preset(request: Request, identifier: str) -> dict[str, bool]:
+    request.app.state.scan_manager.instruction_presets.revoke(identifier)
+    return {"revoked": True}
 
 
 @router.post(
