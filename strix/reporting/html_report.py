@@ -22,6 +22,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _render_markdown(value: object) -> Markup:
+    # Escape raw HTML, reject dangerous link protocols, and never load remote images.
+    renderer = MarkdownIt("commonmark", {"html": False}).enable("table").disable("image")
+    return Markup(renderer.render(str(value or "")))  # noqa: S704 # nosec B704
+
+
 def generate_html_report(
     report: ScanReport,
     output_path: Path,
@@ -35,9 +41,7 @@ def generate_html_report(
         autoescape=select_autoescape(enabled_extensions=("html", "jinja"), default_for_string=True),
     )
 
-    renderer = MarkdownIt("commonmark", {"html": False}).enable("table")
-    # Raw HTML is disabled and markdown-it rejects unsafe link protocols.
-    env.filters["markdown"] = lambda value: Markup(renderer.render(str(value or "")))  # noqa: S704
+    env.filters["markdown"] = _render_markdown
     template = env.get_template("report.html.jinja")
 
     # Read CSS for inline embedding
