@@ -692,6 +692,7 @@ class ScanManager:
         try:
             register_railway_backend()
             settings = load_settings()
+            budget = os.environ.get("STRIX_SCAN_BUDGET_USD", "").strip()
             result = await run_strix_scan(
                 scan_config=config,
                 scan_id=run_name,
@@ -699,7 +700,7 @@ class ScanManager:
                 coordinator=coordinator,
                 interactive=False,
                 max_turns=int(os.environ.get("STRIX_MAX_TURNS", "500")),
-                max_budget_usd=float(os.environ.get("STRIX_SCAN_BUDGET_USD", "30")),
+                max_budget_usd=float(budget) if budget else None,
                 event_sink=report.stream_event,
                 root_finish_tool=accountable_finish_scan,
                 mcp_connection_requests=[],

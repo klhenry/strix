@@ -214,6 +214,28 @@ async def running_scan_harness(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    ("configured", "expected"), [(None, None), ("", None), ("  ", None), ("6", 6.0)]
+)
+async def test_scan_budget_is_unlimited_unless_explicitly_configured(
+    running_scan_harness: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    configured: str | None,
+    expected: float | None,
+) -> None:
+    if configured is None:
+        monkeypatch.delenv("STRIX_SCAN_BUDGET_USD", raising=False)
+    else:
+        monkeypatch.setenv("STRIX_SCAN_BUDGET_USD", configured)
+    harness = running_scan_harness
+    run_name = await harness["manager"].start_webhook_scan(_request())
+    await asyncio.wait_for(harness["started"].wait(), timeout=5)
+    assert harness["execute"].call_args.kwargs["max_budget_usd"] == expected
+    harness["release"].set()
+    await asyncio.wait_for(harness["manager"]._scans[run_name].task, timeout=5)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     ("scan_type", "override", "hours"),
     [
         ("penetration_test", None, 6),

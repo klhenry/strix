@@ -17,6 +17,15 @@ returning `external_scan_id`. Existing signed heartbeat/completion callbacks and
 presigned PDF uploads are preserved. `model` optionally selects a provider model
 for one request; omitting it uses the deployed `STRIX_LLM` default.
 
+## Scan budgets
+
+Web assessments have no dollar budget by default. Leave `STRIX_SCAN_BUDGET_USD`
+unset or blank to run without a cost-triggered wind-down or stop. Operators can
+optionally set a positive dollar amount for a deliberately bounded evaluation.
+Provider credit/key limits are separate; removing a scan budget does not remove
+OpenRouter account, workspace, key, or provider limits. Existing watchdog and
+turn limits still apply independently of cost.
+
 ## Authenticated assessments
 
 Supply the login URL, authorized test credentials, exact account/tenant and rules
