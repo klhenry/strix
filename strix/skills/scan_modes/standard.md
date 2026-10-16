@@ -15,11 +15,14 @@ Systematic testing across the full attack surface. Understand the application be
 
 **Whitebox (source available)**
 - Map codebase structure: modules, entry points, routing
+- Run `semgrep` first-pass triage to prioritize risky flows before deep manual review
+- Run at least one AST-structural mapping pass (`sg` and/or Tree-sitter), then use outputs for route, sink, and trust-boundary mapping
+- Keep AST output bounded to relevant paths and hypotheses; avoid whole-repo generic function dumps
 - Identify architecture pattern (MVC, microservices, monolith)
 - Trace input vectors: forms, APIs, file uploads, headers, cookies
 - Review authentication and authorization flows
 - Analyze database interactions and ORM usage
-- Check dependencies for known CVEs
+- Check dependencies and repo risks with `trivy fs`, `gitleaks`, and `trufflehog`
 - Understand the data model and sensitive data locations
 
 **Blackbox (no source)**
@@ -74,7 +77,7 @@ Test each attack surface methodically. Spawn focused subagents for different are
 - Demonstrate actual impact, not theoretical risk
 - Chain vulnerabilities to show maximum severity
 - Document full attack path from entry to impact
-- Use python tool for complex exploit development
+- Use Python scripts through `exec_command` for complex exploit development
 
 ## Phase 5: Reporting
 

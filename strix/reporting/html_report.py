@@ -2,17 +2,30 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from markdown_it import MarkdownIt
+from markupsafe import Markup
 
 from strix.reporting.evidence import collect_evidence, encode_evidence_base64
-from strix.reporting.models import ScanReport
 from strix.reporting.svg_charts import cvss_gauge, severity_bar_chart
 from strix.utils.resource_paths import get_strix_resource_path
 
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from strix.reporting.models import ScanReport
+
+
 logger = logging.getLogger(__name__)
+
+
+def _render_markdown(value: object) -> Markup:
+    # Escape raw HTML, reject dangerous link protocols, and never load remote images.
+    renderer = MarkdownIt("commonmark", {"html": False}).enable("table").disable("image")
+    return Markup(renderer.render(str(value or "")))  # noqa: S704 # nosec B704
 
 
 def generate_html_report(
@@ -28,6 +41,7 @@ def generate_html_report(
         autoescape=select_autoescape(enabled_extensions=("html", "jinja"), default_for_string=True),
     )
 
+    env.filters["markdown"] = _render_markdown
     template = env.get_template("report.html.jinja")
 
     # Read CSS for inline embedding
@@ -59,9 +73,7 @@ def generate_html_report(
     if logo_path.exists():
         import base64
 
-        logo_b64 = base64.b64encode(
-            logo_path.read_bytes()
-        ).decode("ascii")
+        logo_b64 = base64.b64encode(logo_path.read_bytes()).decode("ascii")
     else:
         logo_b64 = ""
 

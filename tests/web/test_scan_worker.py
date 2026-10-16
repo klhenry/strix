@@ -22,13 +22,15 @@ if TYPE_CHECKING:
 
 def _probe_worker(connection: Connection, request: dict[str, Any]) -> None:
     """Use the actual mutable agent registry inside a spawned interpreter."""
-    from strix.tools.agents_graph import agents_graph_actions as graph
+    from strix.core.agents import AgentCoordinator
+
+    graph = AgentCoordinator()
 
     os.setsid()
     connection.send({"type": "started"})
-    before = list(graph._agent_graph["nodes"])
+    before = list(graph.statuses)
     root = request["run_name"]
-    graph._agent_graph["nodes"][root] = {"parent_id": None, "status": "running"}
+    graph.statuses[root] = "running"
     connection.send({"type": "progress", "progress": 12})
     message = connection.recv()
     if message["command"] == "crash":
@@ -38,7 +40,7 @@ def _probe_worker(connection: Connection, request: dict[str, Any]) -> None:
             "type": "result",
             "error": None,
             "before": before,
-            "nodes": list(graph._agent_graph["nodes"]),
+            "nodes": list(graph.statuses),
             "pid": os.getpid(),
         }
     )
@@ -227,7 +229,7 @@ async def test_failure_event_stream_ends_without_waiting_forever(tmp_path) -> No
 
 
 def test_report_directory_is_stable_after_python_tool_changes_cwd(monkeypatch, tmp_path) -> None:
-    from strix.telemetry.tracer import Tracer
+    from strix.report.state import ReportState as Tracer
 
     output = tmp_path / "runs"
     workspace = tmp_path / "workspace"
@@ -260,7 +262,7 @@ async def test_real_spawned_worker_reports_readiness_failure_before_testing(monk
         ),
         timeout=15,
     )
-    assert "missing executable: tmux" in result["error"]
+    assert "missing executable: agent-browser" in result["error"]
     assert "missing executable: caido-cli" in result["error"]
     assert not (tmp_path / "runs" / "preflight" / "events.jsonl").exists()
     assert not worker.ready

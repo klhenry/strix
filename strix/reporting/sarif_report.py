@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from strix.reporting.models import ScanReport, VulnerabilityReport
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from strix.reporting.models import ScanReport, VulnerabilityReport
 
 
 _SEVERITY_TO_SARIF_LEVEL = {

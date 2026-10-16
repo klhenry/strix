@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from strix.web.services.run_store import RunStore
+from strix.web.services.instruction_presets import InstructionPresets
 from strix.web.services.scan_worker import ScanWorker
+
+
+if TYPE_CHECKING:
+    from strix.web.models.api_v1 import ScanRequest
+    from strix.web.services.run_store import RunStore
 
 
 logger = logging.getLogger(__name__)
@@ -46,6 +52,7 @@ class ScanState:
     callback_failed: bool = False
     terminal_callback_started: bool = False
     worker: ScanWorker | None = None
+    model: str | None = None
 
 
 class ScanManager:
@@ -54,7 +61,9 @@ class ScanManager:
     def __init__(self, run_store: RunStore) -> None:
         self.run_store = run_store
         self._scans: dict[str, ScanState] = {}
+        self._messages: set[asyncio.Task[Any]] = set()
         self._scan_id_map: dict[str, str] = {}  # external scan_id -> internal run_name
+        self.instruction_presets = InstructionPresets()
 
     # ── Properties (backward-compatible with dashboard routes) ──
 
@@ -94,6 +103,7 @@ class ScanManager:
         targets: list[str],
         scan_mode: str = "deep",
         instruction: str = "",
+        model: str | None = None,
     ) -> str:
         self._cleanup_finished()
         if len(self._active_scans()) >= MAX_CONCURRENT_SCANS:
@@ -101,12 +111,14 @@ class ScanManager:
             raise RuntimeError(msg)
 
         run_name = self._generate_run_name(targets)
-        task = asyncio.create_task(
-            self._run_scan(run_name, targets, scan_mode, instruction)
-        )
+        task = asyncio.create_task(self._run_scan(run_name, targets, scan_mode, instruction))
         self._scans[run_name] = ScanState(
-            task=task, run_name=run_name, scan_mode=scan_mode,
+            task=task,
+            run_name=run_name,
+            scan_mode=scan_mode,
+            model=model,
         )
+        self._scan_id_map[run_name] = run_name
         return run_name
 
     async def stop_scan(self, run_name: str | None = None) -> bool:
@@ -129,15 +141,11 @@ class ScanManager:
         if state.worker:
             state.worker.stop_reason = state.last_error
         state.task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError, Exception):
             await state.task
-        except (asyncio.CancelledError, Exception):  # noqa: BLE001
-            pass
         if state.tracer:
-            try:
+            with contextlib.suppress(Exception):
                 state.tracer.cleanup()
-            except Exception:  # noqa: BLE001
-                pass
         return True
 
     def pause_scan(self, run_name: str | None = None) -> bool:
@@ -151,7 +159,6 @@ class ScanManager:
         if state is None or state.agent is None:
             return False
         state.paused = True
-        state.agent.cancel_current_execution()
         if state.tracer:
             state.tracer._emit_event(
                 "scan.paused",
@@ -188,11 +195,11 @@ class ScanManager:
             return state.worker.agent_ready and state.worker.send("comment", message=message)
         if state is None or state.agent is None:
             return False
-        self._inject_user_message(message)
+        self._inject_user_message(message, state)
         if state.tracer:
             state.tracer._emit_event(
                 "user.comment",
-                payload={"message": message},
+                payload={"message": "Private operator instructions delivered"},
                 status="delivered",
                 source="strix.web",
             )
@@ -202,7 +209,6 @@ class ScanManager:
 
     async def start_webhook_scan(self, request: Any) -> str:
         """Start a scan from the Accountable webhook API. Returns internal run_name."""
-        from strix.web.models.api_v1 import ScanRequest
 
         req: ScanRequest = request
         self._cleanup_finished()
@@ -225,6 +231,10 @@ class ScanManager:
 
         scan_mode = "vuln_scan" if req.scan_type == "vulnerability_scan" else "deep"
         targets = req.resolved_targets()
+        instruction = req.instruction.strip()
+        preset = self.instruction_presets.consume(req)
+        if preset:
+            instruction = "\n\n".join(filter(None, [instruction, preset]))
 
         run_name = self._generate_run_name(targets)
 
@@ -236,7 +246,7 @@ class ScanManager:
         )
 
         task = asyncio.create_task(
-            self._run_scan(run_name, targets, scan_mode, req.instruction.strip(), webhook_meta)
+            self._run_scan(run_name, targets, scan_mode, instruction, webhook_meta)
         )
 
         scan_state = ScanState(
@@ -244,12 +254,11 @@ class ScanManager:
             run_name=run_name,
             scan_mode=scan_mode,
             webhook_meta=webhook_meta,
+            model=req.model,
         )
 
         # Start heartbeat + watchdog
-        scan_state.heartbeat_task = asyncio.create_task(
-            self._heartbeat_loop(run_name)
-        )
+        scan_state.heartbeat_task = asyncio.create_task(self._heartbeat_loop(run_name))
 
         self._scans[run_name] = scan_state
         self._scan_id_map[req.scan_id] = run_name
@@ -276,7 +285,8 @@ class ScanManager:
                 "status": "callback_failed",
                 "progress": 0,
                 "error_message": (
-                    state.last_error or "Callback URL is unreachable — the originating app should "
+                    state.last_error
+                    or "Callback URL is unreachable — the originating app should "
                     "re-trigger this scan with a corrected callback_url/upload_url."
                 ),
             }
@@ -318,7 +328,8 @@ class ScanManager:
                         continue
                     try:
                         evt = json.loads(line)
-                    except Exception:  # noqa: BLE001
+                    except (ValueError, TypeError):
+                        logger.debug("Ignoring incomplete run event")
                         continue
                     if evt.get("event_type") == "run.error":
                         status = "failed"
@@ -351,7 +362,7 @@ class ScanManager:
         """Remove finished scan states (keep last 50 for status lookups)."""
         finished = [k for k, v in self._scans.items() if v.task.done()]
         if len(finished) > 50:
-            for k in finished[:len(finished) - 50]:
+            for k in finished[: len(finished) - 50]:
                 self._scans.pop(k, None)
                 for scan_id, run_name in list(self._scan_id_map.items()):
                     if run_name == k:
@@ -389,34 +400,30 @@ class ScanManager:
         except Exception:  # noqa: BLE001
             return 0
 
-    def _inject_user_message(self, content: str) -> None:
-        """Send a message to the root agent via the agent messaging system."""
-        from strix.tools.agents_graph.agents_graph_actions import (
-            _agent_messages,
-            _root_agent_id,
-        )
-
-        agent_id = _root_agent_id
-        if not agent_id:
+    def _inject_user_message(self, content: str, state: ScanState | None = None) -> None:
+        state = state or self._get_active_scan()
+        if state is None or state.agent is None:
             return
+        from strix.core.agents import ACTIVE_STATUSES
 
-        message_data = {
-            "id": f"msg_{uuid4().hex[:8]}",
-            "from": "user",
-            "to": agent_id,
-            "content": content,
-            "message_type": "instruction",
-            "priority": "high",
-            "timestamp": datetime.now(UTC).isoformat(),
-            "delivered": True,
-            "read": False,
-        }
-
-        if agent_id not in _agent_messages:
-            _agent_messages[agent_id] = []
-        _agent_messages[agent_id].append(message_data)
-
-    # ── Heartbeat + watchdog ──
+        coordinator = state.agent
+        recipients = [
+            aid for aid, status in coordinator.statuses.items() if status in ACTIVE_STATUSES
+        ]
+        for agent_id in recipients:
+            delivery = asyncio.create_task(
+                coordinator.send(
+                    agent_id,
+                    {
+                        "from": "user",
+                        "type": "instruction",
+                        "priority": "high",
+                        "content": content,
+                    },
+                )
+            )
+            self._messages.add(delivery)
+            delivery.add_done_callback(self._messages.discard)
 
     async def _heartbeat_loop(self, run_name: str) -> None:
         """Send periodic heartbeats for webhook scans; also acts as timeout watchdog."""
@@ -470,10 +477,11 @@ class ScanManager:
                         secret,
                     )
                 except CallbackDeliveryError:
-                    logger.error(
+                    logger.exception(
                         "Heartbeat callback unreachable for %s — callback_url %s is invalid, "
                         "cancelling scan. The originating app should re-trigger this scan.",
-                        run_name, meta.callback_url,
+                        run_name,
+                        meta.callback_url,
                     )
                     state.callback_failed = True
                     state.last_error = "Scan was cancelled because the callback URL is unreachable"
@@ -489,7 +497,7 @@ class ScanManager:
 
     # ── Core scan runner ──
 
-    async def _run_scan(  # noqa: PLR0912
+    async def _run_scan(
         self,
         run_name: str,
         targets: list[str],
@@ -505,19 +513,22 @@ class ScanManager:
         state.worker = worker
         runs_dir = self.run_store.runs_dir.resolve()
         try:
-            result = await worker.run({
-                "run_name": run_name,
-                "targets": targets,
-                "scan_mode": scan_mode,
-                "instruction": instruction,
-                "runs_dir": str(runs_dir),
-                "workspace": str(runs_dir / run_name / "workspace"),
-            })
+            result = await worker.run(
+                {
+                    "run_name": run_name,
+                    "model": state.model,
+                    "targets": targets,
+                    "scan_mode": scan_mode,
+                    "instruction": instruction,
+                    "runs_dir": str(runs_dir),
+                    "workspace": str(runs_dir / run_name / "workspace"),
+                }
+            )
             if result.get("error"):
                 state.last_error = result["error"]
         except asyncio.CancelledError:
             state.last_error = state.last_error or "Scan was cancelled"
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.exception("Scan worker %s failed", run_name)
             state.last_error = str(exc)
         finally:
@@ -534,9 +545,13 @@ class ScanManager:
             try:
                 if state.last_error:
                     await self._post_terminal_callback(
-                        run_name, webhook_meta,
-                        {"status": "failed", "findings_summary": None,
-                         "error_message": state.last_error},
+                        run_name,
+                        webhook_meta,
+                        {
+                            "status": "failed",
+                            "findings_summary": None,
+                            "error_message": state.last_error,
+                        },
                     )
                 else:
                     await self._send_completion_callback(run_name, webhook_meta)
@@ -547,9 +562,14 @@ class ScanManager:
                 self._record_run_error(run_name, state.last_error)
                 try:
                     await self._post_terminal_callback(
-                        run_name, webhook_meta,
-                        {"status": "failed", "findings_summary": None,
-                         "pdf_uploaded": False, "error_message": state.last_error},
+                        run_name,
+                        webhook_meta,
+                        {
+                            "status": "failed",
+                            "findings_summary": None,
+                            "pdf_uploaded": False,
+                            "error_message": state.last_error,
+                        },
                     )
                 except Exception:
                     state.callback_failed = True
@@ -557,15 +577,20 @@ class ScanManager:
             except CallbackDeliveryError:
                 state.callback_failed = True
                 logger.exception("Cannot deliver terminal callback for %s", run_name)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 state.callback_failed = True
                 state.last_error = state.last_error or "Scan completed but report delivery failed"
                 logger.exception("Terminal callback failed for %s", run_name)
                 try:
                     await self._post_terminal_callback(
-                        run_name, webhook_meta,
-                        {"status": "failed", "findings_summary": None,
-                         "pdf_uploaded": False, "error_message": state.last_error},
+                        run_name,
+                        webhook_meta,
+                        {
+                            "status": "failed",
+                            "findings_summary": None,
+                            "pdf_uploaded": False,
+                            "error_message": state.last_error,
+                        },
                     )
                 except Exception:
                     logger.exception("Cannot deliver failure callback for %s", run_name)
@@ -576,14 +601,19 @@ class ScanManager:
         run_dir = self.run_store.runs_dir / run_name
         run_dir.mkdir(parents=True, exist_ok=True)
         with (run_dir / "events.jsonl").open("a", encoding="utf-8") as events:
-            events.write(json.dumps({
-                "timestamp": datetime.now(UTC).isoformat(),
-                "event_type": "run.error",
-                "run_id": run_name,
-                "payload": {"error": error},
-                "status": "error",
-                "source": "strix.web",
-            }) + "\n")
+            events.write(
+                json.dumps(
+                    {
+                        "timestamp": datetime.now(UTC).isoformat(),
+                        "event_type": "run.error",
+                        "run_id": run_name,
+                        "payload": {"error": error},
+                        "status": "error",
+                        "source": "strix.web",
+                    }
+                )
+                + "\n"
+            )
 
     async def _post_terminal_callback(
         self, run_name: str, meta: WebhookMeta, payload: dict[str, Any]
@@ -595,10 +625,14 @@ class ScanManager:
         state = self._scans.get(run_name)
         if state:
             state.terminal_callback_started = True
-        delivery = asyncio.create_task(asyncio.to_thread(
-            post_callback, meta.callback_url, payload,
-            os.environ.get("WEBHOOK_SHARED_SECRET", ""),
-        ))
+        delivery = asyncio.create_task(
+            asyncio.to_thread(
+                post_callback,
+                meta.callback_url,
+                payload,
+                os.environ.get("WEBHOOK_SHARED_SECRET", ""),
+            )
+        )
         while not delivery.done():
             try:
                 await asyncio.shield(delivery)
@@ -614,314 +648,113 @@ class ScanManager:
         instruction: str,
         webhook_meta: WebhookMeta | None = None,
     ) -> None:
+        """Run the current upstream SDK engine and preserve Accountable artifacts."""
+        from strix.accountable.finish import accountable_finish_scan
+        from strix.accountable.report_state import AccountableReportState
+        from strix.accountable.runtime import register_railway_backend
+        from strix.config import load_settings
+        from strix.core.agents import AgentCoordinator
+        from strix.core.runner import run_strix_scan
+        from strix.report.state import set_global_report_state
+        from strix.scope import reconcile_instruction_targets
+
         state = self._scans.get(run_name)
-        scan_succeeded = False
-
-        try:
-            # Ensure env vars are loaded from ~/.strix/cli-config.json
-            import json as _json
-            import os as _os
-            from pathlib import Path as _Path
-
-            _cfg_path = _Path.home() / ".strix" / "cli-config.json"
-            if _cfg_path.exists():
-                try:
-                    with _cfg_path.open() as _f:
-                        _cfg = _json.load(_f)
-                    for _k, _v in _cfg.get("env", {}).items():
-                        if _k not in _os.environ:
-                            _os.environ[_k] = _v
-                except Exception:  # noqa: BLE001
-                    pass
-
-            from strix.agents.StrixAgent import StrixAgent
+        report = AccountableReportState(run_name)
+        report._run_dir = self.run_store.runs_dir / run_name
+        report._run_dir.mkdir(parents=True, exist_ok=True)
+        coordinator = AgentCoordinator()
+        if state:
+            state.tracer = report
+            state.agent = coordinator
+        set_global_report_state(report)
+        config: dict[str, Any] = {
+            "scan_id": run_name,
+            "run_name": run_name,
+            "scan_mode": scan_mode,
+            "user_instructions": instruction,
+            "non_interactive": True,
+            "accountable": True,
+            "targets": [
+                {"type": "web_application", "details": {"target_url": t}, "original": t}
+                for t in targets
+            ],
+        }
+        for target in reconcile_instruction_targets(targets, instruction):
             from strix.interface.utils import infer_target_type
-            from strix.llm.config import LLMConfig
-            from strix.telemetry.tracer import Tracer, set_global_tracer
 
-            targets_info = []
-            for t in targets:
-                try:
-                    target_type, target_dict = infer_target_type(t)
-                    targets_info.append(
-                        {"type": target_type, "details": target_dict, "original": t}
-                    )
-                except ValueError:
-                    targets_info.append(
-                        {"type": "web_application", "details": {"target_url": t}, "original": t}
-                    )
-
-            scan_config: dict[str, Any] = {
-                "scan_id": run_name,
-                "targets": targets_info,
-                "user_instructions": instruction,
-                "run_name": run_name,
-                "scan_mode": scan_mode,
-            }
-
-            llm_config = LLMConfig(scan_mode=scan_mode)
-            agent_config: dict[str, Any] = {
-                "llm_config": llm_config,
-                "max_iterations": llm_config.max_iterations,
-            }
-
-            tracer = Tracer(run_name)
-            tracer.set_scan_config(scan_config)
-            if state:
-                state.tracer = tracer
-                state.agent = None
-            set_global_tracer(tracer)
-
-            agent = StrixAgent(agent_config)
-            if state:
-                state.agent = agent
-
-            # Verify critical tools are registered — if they're missing, the
-            # agent can never report findings and the PDF will always be empty.
-            from strix.tools.registry import get_tool_names
-
-            registered = set(get_tool_names())
-            critical_tools = {"create_vulnerability_report", "finish_scan"}
-            missing = critical_tools - registered
-            if missing:
-                raise RuntimeError(  # noqa: TRY301
-                    f"Required scan tools are not registered: {', '.join(sorted(missing))}"
-                )
-
-            logger.info(
-                "[SCAN_LIFECYCLE] Agent starting scan — run_name=%s, mode=%s, "
-                "targets=%s, tracer_id=%s",
-                run_name,
-                scan_mode,
-                [t.get("original", "?") for t in targets_info],
-                id(tracer),
+            kind, details = infer_target_type(target)
+            config["targets"].append({"type": kind, "details": details, "original": target})
+        report.set_scan_config(config)
+        succeeded = False
+        try:
+            register_railway_backend()
+            settings = load_settings()
+            result = await run_strix_scan(
+                scan_config=config,
+                scan_id=run_name,
+                image=settings.runtime.image,
+                coordinator=coordinator,
+                interactive=False,
+                max_turns=int(os.environ.get("STRIX_MAX_TURNS", "500")),
+                max_budget_usd=float(os.environ.get("STRIX_SCAN_BUDGET_USD", "30")),
+                event_sink=report.stream_event,
+                root_finish_tool=accountable_finish_scan,
+                mcp_connection_requests=[],
             )
-            result = await agent.execute_scan(scan_config)
-
-            # Log scan completion with vulnerability count
-            vuln_count = len(tracer.vulnerability_reports) if tracer else -1
-            logger.info(
-                "[SCAN_LIFECYCLE] Agent finished — run_name=%s, "
-                "vulnerability_reports=%d, agent_result_success=%s",
-                run_name,
-                vuln_count,
-                result.get("success") if isinstance(result, dict) else "N/A",
-            )
-
-            # Agent returns {"success": False, ...} on internal failures
-            # (sandbox init, LLM errors) without raising — treat as failure
-            if not isinstance(result, dict) or result.get("success") is not True:
-                error_msg = (
-                    result.get("error") if isinstance(result, dict) else None
-                ) or "Scan ended without a successful agent result"
-                raise RuntimeError(error_msg)
-
-            final_fields = tracer.scan_results or {}
-            if not final_fields.get("scan_completed") or not all(
-                isinstance(final_fields.get(field), str) and final_fields[field].strip()
-                for field in (
-                    "executive_summary", "methodology", "technical_analysis", "recommendations"
+            fields = report.scan_results or {}
+            if (
+                result is None
+                or not fields.get("scan_completed")
+                or not all(
+                    isinstance(fields.get(k), str) and fields[k].strip()
+                    for k in (
+                        "executive_summary",
+                        "methodology",
+                        "technical_analysis",
+                        "recommendations",
+                    )
                 )
             ):
-                raise RuntimeError(  # noqa: TRY301
-                    "Scan ended without a complete final report from finish_scan"
-                )
-
+                raise RuntimeError("Scan ended without a complete final report from finish_scan")
+            succeeded = True
         except asyncio.CancelledError:
-            error_msg = (state.last_error if state else None) or "Scan was cancelled"
-            logger.info("Scan %s cancelled: %s", run_name, error_msg)
             if state:
-                state.last_error = error_msg
-                if state.tracer:
-                    state.tracer._emit_event(
-                        "run.error",
-                        payload={"error": error_msg},
-                        status="error",
-                        source="strix.web",
-                    )
-            # Report the recorded cause; cancellation alone does not imply timeout.
-            if webhook_meta:
-                secret = os.environ.get("WEBHOOK_SHARED_SECRET", "")
-                from strix.web.services.webhook import CallbackDeliveryError, post_callback
-
-                try:
-                    post_callback(
-                        webhook_meta.callback_url,
-                        {
-                            "status": "failed",
-                            "findings_summary": None,
-                            "error_message": error_msg,
-                        },
-                        secret,
-                    )
-                    logger.info("Sent cancellation callback for %s", run_name)
-                except CallbackDeliveryError:
-                    logger.error(
-                        "Cannot deliver cancellation callback for %s — "
-                        "callback_url %s is unreachable. Marking as callback_failed.",
-                        run_name, webhook_meta.callback_url,
-                    )
-                    if state:
-                        state.callback_failed = True
-                except Exception:  # noqa: BLE001
-                    logger.exception("Failed to send cancellation callback for %s", run_name)
+                state.last_error = state.last_error or "Scan was cancelled"
         except Exception as exc:
             logger.exception("Scan %s failed", run_name)
             if state:
                 state.last_error = str(exc)
-            tracer_ref = state.tracer if state else None
-            if tracer_ref:
-                tracer_ref._emit_event(
-                    "run.error",
-                    payload={"error": str(exc)},
-                    status="error",
-                    source="strix.web",
-                )
-
-            # Send failure callback if webhook scan
-            if webhook_meta:
-                secret = os.environ.get("WEBHOOK_SHARED_SECRET", "")
-                from strix.web.services.webhook import CallbackDeliveryError, post_callback
-
-                try:
-                    post_callback(
-                        webhook_meta.callback_url,
-                        {
-                            "status": "failed",
-                            "findings_summary": None,
-                            "error_message": str(exc),
-                        },
-                        secret,
-                    )
-                    logger.info("Sent failure callback for %s", run_name)
-                except CallbackDeliveryError:
-                    logger.error(
-                        "Cannot deliver failure callback for %s — "
-                        "callback_url %s is unreachable. Marking as callback_failed.",
-                        run_name, webhook_meta.callback_url,
-                    )
-                    if state:
-                        state.callback_failed = True
-                except Exception:  # noqa: BLE001
-                    logger.exception("Failed to send failure callback for %s", run_name)
-        else:
-            scan_succeeded = True
         finally:
-            # Generate reports FIRST (save_run_data creates HTML/PDF/JSON/SARIF)
-            tracer_ref = state.tracer if state else None
-            if tracer_ref:
-                logger.info(
-                    "[SCAN_LIFECYCLE] Saving scan reports — "
-                    "vulnerability_reports=%d, tracer_id=%s, run_name=%s",
-                    len(tracer_ref.vulnerability_reports),
-                    id(tracer_ref),
-                    run_name,
+            if not succeeded:
+                report.end_time = datetime.now(UTC).isoformat()
+                report.run_record.update(
+                    status="error",
+                    end_time=report.end_time,
+                    error=(state.last_error if state else "Scan failed"),
                 )
-                try:
-                    # Preserve partial reports without marking a failed or
-                    # cancelled run as successfully completed on disk.
-                    if not scan_succeeded:
-                        tracer_ref.end_time = datetime.now(UTC).isoformat()
-                        tracer_ref.run_metadata.update(
-                            status="error", end_time=tracer_ref.end_time,
-                            error=state.last_error if state else "Scan did not complete",
-                        )
-                    tracer_ref.save_run_data(mark_complete=scan_succeeded, generate_reports=True)
-                except Exception:  # noqa: BLE001
-                    logger.exception(
-                        "[SCAN_LIFECYCLE] Saving scan reports FAILED for %s", run_name,
-                    )
-            else:
-                logger.warning(
-                    "[SCAN_LIFECYCLE] No tracer ref available at cleanup for %s — "
-                    "reports will NOT be generated",
-                    run_name,
+                report._emit_event(
+                    "run.error", payload={"error": report.run_record["error"]}, status="error"
                 )
-
-            # THEN send webhook callback (so the PDF exists when we try to upload it)
-            if scan_succeeded and webhook_meta:
-                logger.info("Scan %s completed — sending completion callback", run_name)
-                try:
-                    await self._send_completion_callback(run_name, webhook_meta)
-                    logger.info("Completion callback sent for %s", run_name)
-                except Exception as cb_exc:  # noqa: BLE001
-                    from strix.web.services.webhook import CallbackDeliveryError
-
-                    if isinstance(cb_exc, CallbackDeliveryError):
-                        logger.error(
-                            "Completion callback unreachable for %s — "
-                            "callback_url %s is invalid. Marking as callback_failed. "
-                            "The originating app should re-trigger this scan.",
-                            run_name, webhook_meta.callback_url,
-                        )
-                        if state:
-                            state.callback_failed = True
-                    else:
-                        logger.exception("Completion callback FAILED for %s — sending error callback", run_name)
-                        secret = os.environ.get("WEBHOOK_SHARED_SECRET", "")
-                        from strix.web.services.webhook import post_callback
-                        try:
-                            post_callback(
-                                webhook_meta.callback_url,
-                                {
-                                    "status": "failed",
-                                    "findings_summary": None,
-                                    "pdf_uploaded": False,
-                                    "error_message": "Scan completed but report delivery failed",
-                                },
-                                secret,
-                            )
-                        except CallbackDeliveryError:
-                            logger.error(
-                                "Fallback callback also unreachable for %s — "
-                                "callback_url %s. Marking as callback_failed.",
-                                run_name, webhook_meta.callback_url,
-                            )
-                            if state:
-                                state.callback_failed = True
-                        except Exception:  # noqa: BLE001
-                            logger.exception("Fallback callback also failed for %s", run_name)
-
-            # Clean up Docker containers for this scan to prevent memory buildup
+            report.save_run_data(mark_complete=succeeded)
             try:
-                import subprocess
-
-                # Find and remove containers labeled with this scan's ID
-                result = subprocess.run(
-                    ["docker", "ps", "-a", "-q", "--filter", f"label=strix-scan-id={run_name}"],
-                    capture_output=True, text=True, timeout=10,
-                )
-                container_ids = result.stdout.strip().split("\n")
-                for cid in container_ids:
-                    if cid.strip():
-                        subprocess.Popen(
-                            ["docker", "rm", "-f", cid.strip()],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            start_new_session=True,
-                        )
-                        logger.info("Removed Docker container %s for scan %s", cid.strip()[:12], run_name)
-            except Exception:  # noqa: BLE001
-                logger.debug("Docker cleanup skipped or failed for %s", run_name)
-
-            # Also reset global runtime so next scan gets a fresh one
-            try:
-                from strix.runtime import cleanup_runtime
-                cleanup_runtime()
-            except Exception:  # noqa: BLE001
-                pass
-
+                await asyncio.to_thread(report.generate_reports)
+            except Exception as exc:
+                logger.exception("Branded reports failed for %s", run_name)
+                succeeded = False
+                if state:
+                    state.last_error = str(exc)
+                report.run_record.update(status="error", error=str(exc))
+                report._emit_event("run.error", payload={"error": str(exc)}, status="error")
+                report.save_run_data()
+            if succeeded:
+                report._emit_event("run.completed", status="completed")
             if state:
-                state.tracer = None
                 state.agent = None
+                state.tracer = None
                 state.paused = False
-                # Cancel heartbeat
-                if state.heartbeat_task and not state.heartbeat_task.done():
-                    state.heartbeat_task.cancel()
+            set_global_report_state(None)
 
-    async def _send_completion_callback(
-        self, run_name: str, webhook_meta: WebhookMeta
-    ) -> None:
+    async def _send_completion_callback(self, run_name: str, webhook_meta: WebhookMeta) -> None:
         """Upload PDF and send completion callback to Accountable."""
         run_dir = self.run_store.runs_dir / run_name
 
@@ -934,7 +767,9 @@ class ScanManager:
 
         logger.info(
             "Sending completion for %s: callback=%s upload=%s",
-            run_name, webhook_meta.callback_url, webhook_meta.upload_url[:80],
+            run_name,
+            webhook_meta.callback_url,
+            webhook_meta.upload_url[:80],
         )
 
         # Find and upload PDF
@@ -955,14 +790,15 @@ class ScanManager:
                     if pdf_uploaded:
                         logger.info("PDF uploaded successfully for %s", run_name)
                     break
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.exception("Failed to upload PDF %s for %s", pdf_name, run_name)
                     break
 
         if not pdf_uploaded:
             logger.warning(
                 "No PDF uploaded for scan %s — candidates checked: %s, files in dir: %s",
-                run_name, pdf_candidates,
+                run_name,
+                pdf_candidates,
                 [f.name for f in run_dir.iterdir()] if run_dir.exists() else [],
             )
             raise RuntimeError("Scan completed but PDF report is missing or could not be uploaded")
@@ -971,7 +807,8 @@ class ScanManager:
         findings = build_findings_summary(run_dir)
         logger.info("Findings summary for %s: %s", run_name, findings)
         await self._post_terminal_callback(
-            run_name, webhook_meta,
+            run_name,
+            webhook_meta,
             {
                 "status": "completed",
                 "findings_summary": findings,

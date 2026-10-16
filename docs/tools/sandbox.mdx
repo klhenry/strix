@@ -45,13 +45,21 @@ Strix runs inside a Kali Linux-based Docker container with a comprehensive set o
 | [js-beautify](https://github.com/beautifier/js-beautify) | JavaScript deobfuscation       |
 | [JSHint](https://jshint.com)                             | JavaScript code quality tool   |
 
+## Source-Aware Analysis
+
+| Tool                                                    | Description                                   |
+| ------------------------------------------------------- | --------------------------------------------- |
+| [Semgrep](https://github.com/semgrep/semgrep)          | Fast SAST and custom rule matching            |
+| [ast-grep](https://ast-grep.github.io)                 | Structural AST/CST-aware code search (`sg`)   |
+| [Tree-sitter](https://tree-sitter.github.io/tree-sitter/) | Syntax tree parsing and symbol extraction (Java/JS/TS/Python/Go/Bash/JSON/YAML grammars pre-configured) |
+| [Bandit](https://bandit.readthedocs.io)                | Python security linter                        |
+
 ## Secret Detection
 
 | Tool                                                        | Description                           |
 | ----------------------------------------------------------- | ------------------------------------- |
 | [TruffleHog](https://github.com/trufflesecurity/trufflehog) | Find secrets in code and history      |
-| [Semgrep](https://github.com/semgrep/semgrep)               | Static analysis for security patterns |
-| [Bandit](https://bandit.readthedocs.io)                     | Python security linter                |
+| [Gitleaks](https://github.com/gitleaks/gitleaks)            | Detect hardcoded secrets in repositories |
 
 ## Authentication Testing
 
@@ -64,7 +72,7 @@ Strix runs inside a Kali Linux-based Docker container with a comprehensive set o
 
 | Tool                       | Description                                    |
 | -------------------------- | ---------------------------------------------- |
-| [Trivy](https://trivy.dev) | Container and dependency vulnerability scanner |
+| [Trivy](https://trivy.dev) | Filesystem/container scanning for vulns, misconfigurations, secrets, and licenses |
 
 ## HTTP Proxy
 

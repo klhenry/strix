@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
-from typing import AsyncGenerator
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
+
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 
 router = APIRouter()
@@ -21,7 +24,7 @@ async def stream_events(request: Request, run_name: str) -> StreamingResponse:
 
     async def event_generator() -> AsyncGenerator[str, None]:
         if events_path is None:
-            yield "event: error\ndata: {\"message\": \"No events file found\"}\n\n"
+            yield 'event: error\ndata: {"message": "No events file found"}\n\n'
             return
 
         offset = 0

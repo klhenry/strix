@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from strix.tools.finish import finish_actions as fa
+from strix.accountable import coverage as fa
 
 
 def _cfg(target_url: str, instruction: str) -> dict[str, Any]:
@@ -62,15 +62,12 @@ def _reset_state(monkeypatch):
     monkeypatch.setattr(fa, "_zero_findings_warned", set())
     monkeypatch.setattr(fa, "_incomplete_coverage_warned", set())
     monkeypatch.setattr(fa, "_finish_scan_attempts", {})
-    from strix.tools.agents_graph import agents_graph_actions as ag
-
-    monkeypatch.setattr(ag, "_agent_graph", {"nodes": {}, "edges": []})
 
 
 def _install_tracer(monkeypatch, tracer: _FakeTracer) -> None:
-    import strix.telemetry.tracer as tracer_mod
+    import strix.report.state as tracer_mod
 
-    monkeypatch.setattr(tracer_mod, "get_global_tracer", lambda: tracer)
+    monkeypatch.setattr(tracer_mod, "get_global_report_state", lambda: tracer)
 
 
 def _root_state() -> Any:

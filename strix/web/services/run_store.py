@@ -83,7 +83,11 @@ class RunStore:
                 if marker in content:
                     start = content.index(marker) + len(marker)
                     next_section = content.find("\n# ", start)
-                    text = content[start:next_section].strip() if next_section > 0 else content[start:].strip()
+                    text = (
+                        content[start:next_section].strip()
+                        if next_section > 0
+                        else content[start:].strip()
+                    )
                     if attr == "exec_summary":
                         exec_summary = text
                     elif attr == "methodology":
@@ -107,7 +111,11 @@ class RunStore:
     def get_report_path(self, run_name: str, fmt: str) -> Path | None:
         run_dir = self.runs_dir / run_name
         name_map: dict[str, list[str]] = {
-            "html": ["vulnerability_scan_report.html", "penetration_test_report.html", "report.html"],
+            "html": [
+                "vulnerability_scan_report.html",
+                "penetration_test_report.html",
+                "report.html",
+            ],
             "pdf": ["vulnerability_scan_report.pdf", "penetration_test_report.pdf", "report.pdf"],
             "json": ["report.json"],
             "sarif": ["results.sarif"],
@@ -126,7 +134,13 @@ class RunStore:
         start_time = ""
         end_time: str | None = None
         targets: list[str] = []
-        severity_counts: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+        severity_counts: dict[str, int] = {
+            "critical": 0,
+            "high": 0,
+            "medium": 0,
+            "low": 0,
+            "info": 0,
+        }
         vuln_count = 0
 
         if events_file.exists():
@@ -150,8 +164,7 @@ class RunStore:
                         start_time = meta.get("start_time", evt.get("timestamp", ""))
                         raw_targets = meta.get("targets", [])
                         targets = [
-                            (t["original"] if isinstance(t, dict) else str(t))
-                            for t in raw_targets
+                            (t["original"] if isinstance(t, dict) else str(t)) for t in raw_targets
                         ]
                     elif evt_type == "run.configured":
                         cfg = (evt.get("payload") or {}).get("scan_config", {})
@@ -176,9 +189,21 @@ class RunStore:
                         status = "error"
                         end_time = evt.get("timestamp")
 
+        # Upstream findings can be revised or deleted; the current index owns counts.
+        findings = self._read_findings(run_dir)
+        vuln_count = len(findings)
+        severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+        for finding in findings:
+            severity = str(finding.get("severity", "info")).lower()
+            if severity in severity_counts:
+                severity_counts[severity] += 1
+
         available_reports: list[str] = []
         for fmt, names in [
-            ("html", ["vulnerability_scan_report.html", "penetration_test_report.html", "report.html"]),
+            (
+                "html",
+                ["vulnerability_scan_report.html", "penetration_test_report.html", "report.html"],
+            ),
             ("pdf", ["vulnerability_scan_report.pdf", "penetration_test_report.pdf", "report.pdf"]),
             ("json", ["report.json"]),
             ("sarif", ["results.sarif"]),
@@ -201,6 +226,16 @@ class RunStore:
         )
 
     def _read_findings(self, run_dir: Path) -> list[dict[str, Any]]:
+        index_path = run_dir / "vulnerabilities.json"
+        if index_path.exists():
+            data = json.loads(index_path.read_text(encoding="utf-8"))
+            if not isinstance(data, list):
+                raise ValueError("Vulnerability index must contain a list")
+            current = [finding for finding in data if isinstance(finding, dict)]
+            return sorted(
+                current,
+                key=lambda value: SEVERITY_ORDER.get(str(value.get("severity", "info")).lower(), 5),
+            )
         findings: list[dict[str, Any]] = []
         events_file = run_dir / "events.jsonl"
         if not events_file.exists():

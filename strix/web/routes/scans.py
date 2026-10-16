@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
@@ -41,29 +43,39 @@ async def scan_detail(request: Request, run_name: str) -> HTMLResponse:
 
     detail = run_store.get_run(run_name)
     is_live = scan_manager.is_scan_active(run_name)
-    is_paused = is_live and scan_manager._get_scan_for(run_name) is not None and scan_manager._get_scan_for(run_name).paused
+    is_paused = (
+        is_live
+        and scan_manager._get_scan_for(run_name) is not None
+        and scan_manager._get_scan_for(run_name).paused
+    )
 
     if detail is None:
-        return templates.TemplateResponse(
+        return cast(
+            "HTMLResponse",
+            templates.TemplateResponse(
+                request,
+                "scan_detail.html",
+                {
+                    "detail": None,
+                    "run_name": run_name,
+                    "is_live": is_live,
+                    "is_paused": is_paused,
+                },
+            ),
+        )
+
+    return cast(
+        "HTMLResponse",
+        templates.TemplateResponse(
             request,
             "scan_detail.html",
             {
-                "detail": None,
+                "detail": detail,
                 "run_name": run_name,
                 "is_live": is_live,
                 "is_paused": is_paused,
             },
-        )
-
-    return templates.TemplateResponse(
-        request,
-        "scan_detail.html",
-        {
-            "detail": detail,
-            "run_name": run_name,
-            "is_live": is_live,
-            "is_paused": is_paused,
-        },
+        ),
     )
 
 
@@ -78,14 +90,16 @@ async def scan_status(request: Request, run_name: str) -> JSONResponse:
     is_live = scan_manager.is_scan_active(run_name)
     scan_state = scan_manager._get_scan_for(run_name)
     is_paused = is_live and scan_state is not None and scan_state.paused
-    return JSONResponse({
-        "run_name": detail.summary.run_name,
-        "status": "paused" if is_paused else detail.summary.status,
-        "vulnerability_count": detail.summary.vulnerability_count,
-        "severity_counts": detail.summary.severity_counts,
-        "duration": detail.summary.duration_display,
-        "available_reports": detail.summary.available_reports,
-    })
+    return JSONResponse(
+        {
+            "run_name": detail.summary.run_name,
+            "status": "paused" if is_paused else detail.summary.status,
+            "vulnerability_count": detail.summary.vulnerability_count,
+            "severity_counts": detail.summary.severity_counts,
+            "duration": detail.summary.duration_display,
+            "available_reports": detail.summary.available_reports,
+        }
+    )
 
 
 @router.get("/api/scans/{run_name}/findings")

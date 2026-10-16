@@ -37,6 +37,7 @@ class ScanRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     scan_id: str
+    model: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_./:-]{0,199}$")
     scan_type: Literal["vulnerability_scan", "penetration_test"]
     target_url: HttpUrl | None = None
     target_urls: list[HttpUrl] = Field(
@@ -93,3 +94,39 @@ class ScanStatusResponse(BaseModel):
     status: Literal["pending", "in_progress", "completed", "failed", "callback_failed"]
     progress: int = 0
     error_message: str | None = None
+
+
+class AssessmentRequest(BaseModel):
+    """Authenticated CLI assessment without webhook delivery."""
+
+    target_urls: list[HttpUrl] = Field(min_length=1)
+    instruction: str = ""
+    model: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_./:-]{0,199}$")
+    scan_mode: Literal["quick", "standard", "deep", "vuln_scan"] = "deep"
+
+
+class InstructionPresetRequest(BaseModel):
+    """One-use instructions for a legacy app request that cannot send notes."""
+
+    target_url: HttpUrl
+    callback_origin: HttpUrl
+    scan_type: Literal["vulnerability_scan", "penetration_test"] = "penetration_test"
+    instruction: str = Field(min_length=1, max_length=65536, repr=False)
+    expires_in_seconds: int = Field(default=900, ge=60, le=1800)
+
+    @field_validator("callback_origin")
+    @classmethod
+    def require_https_origin(cls, value: HttpUrl) -> HttpUrl:
+        parsed = urlparse(str(value))
+        if (
+            parsed.scheme != "https"
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+            or parsed.username
+            or parsed.password
+        ):
+            raise ValueError(
+                "callback_origin must be an HTTPS origin without credentials or a path"
+            )
+        return value

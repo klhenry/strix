@@ -11,7 +11,7 @@
 
   {% if report.executive_summary %}
   <div class="callout">
-    <strong>What This Means:</strong> {{ report.executive_summary | e }}
+    <strong>What This Means:</strong> {{ report.executive_summary | markdown }}
   </div>
   {% endif %}
 
@@ -54,6 +54,6 @@
 
   {% if report.technical_analysis %}
   <h2 class="sub-heading">Key Takeaways</h2>
-  <div class="finding-text">{{ report.technical_analysis | e }}</div>
+  <div class="finding-text">{{ report.technical_analysis | markdown }}</div>
   {% endif %}
 </div>

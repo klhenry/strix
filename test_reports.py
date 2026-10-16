@@ -2,10 +2,17 @@
 
 from pathlib import Path
 
-from strix.reporting.models import ScanReport, ScanMetadata, VulnerabilityReport, CvssBreakdown, CodeLocation
 from strix.reporting.html_report import generate_html_report
 from strix.reporting.json_report import generate_json_summary
+from strix.reporting.models import (
+    CodeLocation,
+    CvssBreakdown,
+    ScanMetadata,
+    ScanReport,
+    VulnerabilityReport,
+)
 from strix.reporting.sarif_report import generate_sarif_report
+
 
 report = ScanReport(
     metadata=ScanMetadata(
@@ -31,8 +38,14 @@ report = ScanReport(
             remediation_steps="Use parameterized queries instead of string concatenation.",
             cvss=9.8,
             cvss_breakdown=CvssBreakdown(
-                attack_vector="N", attack_complexity="L", privileges_required="N",
-                user_interaction="N", scope="U", confidentiality="H", integrity="H", availability="H",
+                attack_vector="N",
+                attack_complexity="L",
+                privileges_required="N",
+                user_interaction="N",
+                scope="U",
+                confidentiality="H",
+                integrity="H",
+                availability="H",
             ),
             endpoint="/api/login",
             method="POST",
@@ -42,9 +55,9 @@ report = ScanReport(
                     file="src/db/queries.ts",
                     start_line=42,
                     end_line=45,
-                    snippet='const query = `SELECT * FROM users WHERE name = ${name}`;',
+                    snippet="const query = `SELECT * FROM users WHERE name = ${name}`;",
                     label="Unsanitized input used in SQL query",
-                    fix_before='const query = `SELECT * FROM users WHERE name = ${name}`;',
+                    fix_before="const query = `SELECT * FROM users WHERE name = ${name}`;",
                     fix_after="const query = 'SELECT * FROM users WHERE name = $1';\nconst result = await db.query(query, [name]);",
                 ),
             ],
@@ -63,8 +76,14 @@ report = ScanReport(
             remediation_steps="HTML-encode all user input before rendering in the page.",
             cvss=7.1,
             cvss_breakdown=CvssBreakdown(
-                attack_vector="N", attack_complexity="L", privileges_required="N",
-                user_interaction="R", scope="C", confidentiality="L", integrity="L", availability="N",
+                attack_vector="N",
+                attack_complexity="L",
+                privileges_required="N",
+                user_interaction="R",
+                scope="C",
+                confidentiality="L",
+                integrity="L",
+                availability="N",
             ),
             endpoint="/search",
             method="GET",
@@ -99,10 +118,3 @@ out.mkdir(exist_ok=True)
 html_path = generate_html_report(report, out / "report.html", client_name="Acme Health Services")
 json_path = generate_json_summary(report, out / "report.json")
 sarif_path = generate_sarif_report(report, out / "results.sarif")
-
-print(f"HTML:  {html_path}")
-print(f"JSON:  {json_path}")
-print(f"SARIF: {sarif_path}")
-print()
-print("Open the HTML report with:")
-print(f"  open {html_path}")

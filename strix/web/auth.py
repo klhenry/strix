@@ -7,6 +7,7 @@ import os
 from fastapi import HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+
 _bearer_scheme = HTTPBearer(auto_error=False)
 
 

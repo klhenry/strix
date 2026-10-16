@@ -11,13 +11,13 @@
 
 {% if vuln.description %}
 <div class="callout">
-  <strong>What This Means:</strong> {{ vuln.description | e }}
+  <strong>What This Means:</strong> {{ vuln.description | markdown }}
 </div>
 {% endif %}
 
 {% if vuln.technical_analysis %}
 <div class="finding-section-title">Technical Description</div>
-<div class="finding-text">{{ vuln.technical_analysis | e }}</div>
+<div class="finding-text">{{ vuln.technical_analysis | markdown }}</div>
 {% endif %}
 
 {% if vuln.code_locations %}
@@ -39,7 +39,7 @@
 {% if vuln.poc_description or vuln.poc_script_code %}
 <div class="finding-section-title">Evidence</div>
 {% if vuln.poc_description %}
-<div class="finding-text">{{ vuln.poc_description | e }}</div>
+<div class="finding-text">{{ vuln.poc_description | markdown }}</div>
 {% endif %}
 {% if vuln.poc_script_code %}
 <pre><code>{{ vuln.poc_script_code | e }}</code></pre>
@@ -55,14 +55,18 @@
 
 {% if vuln.impact %}
 <div class="finding-section-title">Impact</div>
-<div class="finding-text">{{ vuln.impact | e }}</div>
+<div class="finding-text">{{ vuln.impact | markdown }}</div>
 {% endif %}
 
 {% if vuln.remediation_steps %}
 <div class="finding-section-title">Remediation Steps</div>
-<div class="finding-text">{{ vuln.remediation_steps | e }}</div>
+<div class="finding-text">{{ vuln.remediation_steps | markdown }}</div>
 {% endif %}
 
 {% if not is_last %}
 <hr style="border:none;border-top:1px solid #e2e8f0;margin:32px 0;">
 {% endif %}
+
+{% for label, value in [("Validation evidence", vuln.evidence), ("Confidence", vuln.confidence), ("Confidence rationale", vuln.confidence_rationale), ("Counterevidence", vuln.counterevidence), ("Assumptions", vuln.assumptions), ("Severity conditions", vuln.severity_change_conditions)] %}
+{% if value %}<div class="finding-section-title">{{ label }}</div><div class="finding-text">{{ value | markdown }}</div>{% endif %}
+{% endfor %}

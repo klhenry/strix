@@ -510,14 +510,49 @@ code { font-family: inherit; }
 
 @page {
     size: A4;
+    margin: 18mm 0 16mm;
+    @top-center {
+        content: "Accountable  |  CONFIDENTIAL";
+        background: #1a2332;
+        color: #ffffff;
+        font-family: Arial, sans-serif;
+        font-size: 9px;
+        letter-spacing: 1px;
+        vertical-align: middle;
+    }
+    @bottom-center {
+        content: "Accountable HQ | accountablehq.com  -  " counter(page) " / " counter(pages);
+        color: #64748b;
+        font-family: Arial, sans-serif;
+        font-size: 9px;
+        vertical-align: middle;
+    }
+}
+
+@page :first {
     margin: 0;
+    @top-center { content: none; }
+    @bottom-center { content: none; }
 }
 
 @media print {
     body { font-size: 11pt; margin: 0; padding: 0; }
-    .cover-page { min-height: 100vh; page-break-after: always; }
+    .cover-page { height: 297mm; min-height: 0; page-break-after: always; }
+    .page-header, .page-footer { display: none; }
+    .page-content { padding-bottom: 0; }
+    h1, h2, h3, h4 { break-after: avoid; page-break-after: avoid; }
+    p { orphans: 3; widows: 3; }
     .page-break { page-break-before: always; }
     .report-table { page-break-inside: avoid; }
     .finding-card { page-break-inside: avoid; }
     .toc a { color: inherit; }
 }
+
+.finding-text { white-space: normal; overflow-wrap: anywhere; }
+.finding-text p, .callout p { margin: 0 0 10px; }
+.finding-text ul, .finding-text ol, .callout ul, .callout ol, .actual-tools { margin: 8px 0 16px 22px; }
+.finding-text h2, .finding-text h3 { margin: 18px 0 8px; }
+.finding-text table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 12px; }
+.finding-text th, .finding-text td { padding: 7px; border: 1px solid #e2e8f0; vertical-align: top; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media print { tr { break-inside: avoid; } .report-table { break-inside: auto; } }
