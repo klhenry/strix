@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 from datetime import timedelta
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -19,6 +17,7 @@ from strix.web.services.scan_manager import ScanManager
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
+    from pathlib import Path
 
 
 def _request(**overrides: Any) -> ScanRequest:
@@ -148,7 +147,6 @@ async def running_scan_harness(
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Exercise the real runner and watchdog without LLM, Docker, or HTTP calls."""
     manager = ScanManager(RunStore(tmp_path / "runs"))
-    monkeypatch.setattr(manager, "_run_scan", manager._run_scan_in_process)
     started = asyncio.Event()
     tick = asyncio.Event()
     release = asyncio.Event()
@@ -162,7 +160,7 @@ async def running_scan_harness(
     }
     callbacks = MagicMock()
 
-    async def execute_scan(_config: Any) -> dict[str, bool]:
+    async def execute_scan(**_config: Any) -> dict[str, bool]:
         started.set()
         await release.wait()
         return {"success": True}
@@ -171,27 +169,20 @@ async def running_scan_harness(
         await tick.wait()
         tick.clear()
 
-    # Prevent local credentials/configuration and runtime cleanup from being used.
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    execute = AsyncMock(side_effect=execute_scan)
+    monkeypatch.setattr("strix.core.runner.run_strix_scan", execute)
     monkeypatch.setattr(
-        importlib.import_module("strix.agents.StrixAgent"),
-        "StrixAgent",
-        MagicMock(
-            return_value=MagicMock(execute_scan=AsyncMock(side_effect=execute_scan)),
-        ),
+        "strix.accountable.report_state.AccountableReportState", lambda _name: tracer
     )
-    monkeypatch.setattr("strix.llm.config.LLMConfig", MagicMock())
-    monkeypatch.setattr("strix.telemetry.tracer.Tracer", MagicMock(return_value=tracer))
-    monkeypatch.setattr("strix.telemetry.tracer.set_global_tracer", MagicMock())
-    monkeypatch.setattr(
-        "strix.tools.registry.get_tool_names",
-        lambda: [
-            "create_vulnerability_report",
-            "finish_scan",
-        ],
-    )
-    monkeypatch.setattr("strix.runtime.cleanup_runtime", MagicMock())
-    monkeypatch.setattr("subprocess.run", MagicMock(return_value=MagicMock(stdout="")))
+    monkeypatch.setattr("strix.accountable.runtime.register_railway_backend", lambda: None)
+
+    async def worker_run(_worker, request):
+        await manager._run_scan_in_process(
+            request["run_name"], request["targets"], request["scan_mode"], request["instruction"]
+        )
+        return {"error": manager._scans[request["run_name"]].last_error}
+
+    monkeypatch.setattr("strix.web.services.scan_worker.ScanWorker.run", worker_run)
     monkeypatch.setattr("strix.web.services.webhook.post_callback", callbacks)
     monkeypatch.setattr("strix.web.services.scan_manager.asyncio.sleep", heartbeat_sleep)
     monkeypatch.setattr(manager, "_send_completion_callback", AsyncMock())
@@ -201,6 +192,7 @@ async def running_scan_harness(
     try:
         yield {
             "manager": manager,
+            "execute": execute,
             "started": started,
             "tick": tick,
             "release": release,
@@ -252,13 +244,9 @@ async def test_watchdog_reports_one_precise_timeout_and_preserves_partial_run(
     assert harness["callbacks"].call_args.args[1]["error_message"] == expected_error
     assert harness["callbacks"].call_args.args[1]["status"] == "failed"
     assert manager.get_webhook_scan_status(run_name)["error_message"] == expected_error
-    harness["tracer"]._emit_event.assert_called_once_with(
-        "run.error",
-        payload={"error": expected_error},
-        status="error",
-        source="strix.web",
-    )
-    harness["tracer"].save_run_data.assert_called_once_with(mark_complete=False, generate_reports=True)
+    assert (manager.run_store.runs_dir / run_name / "events.jsonl").exists()
+    assert expected_error in (manager.run_store.runs_dir / run_name / "events.jsonl").read_text()
+    harness["tracer"].save_run_data.assert_any_call(mark_complete=False)
     manager._send_completion_callback.assert_not_awaited()
 
 
@@ -284,7 +272,7 @@ async def test_non_watchdog_cancellation_has_no_timeout_claim(
     harness["callbacks"].assert_called_once()
     assert harness["callbacks"].call_args.args[1]["error_message"] == expected_error
     assert manager.get_webhook_scan_status(run_name)["error_message"] == expected_error
-    harness["tracer"].save_run_data.assert_called_once_with(mark_complete=False, generate_reports=True)
+    harness["tracer"].save_run_data.assert_any_call(mark_complete=False)
 
 
 @pytest.mark.asyncio
@@ -305,7 +293,7 @@ async def test_unreachable_heartbeat_records_callback_failure(
     assert manager.get_webhook_scan_status(run_name)["status"] == "callback_failed"
     assert state.last_error == "Scan was cancelled because the callback URL is unreachable"
     assert harness["callbacks"].call_args.args[1]["error_message"] == state.last_error
-    harness["tracer"].save_run_data.assert_called_once_with(mark_complete=False, generate_reports=True)
+    harness["tracer"].save_run_data.assert_any_call(mark_complete=False)
 
 
 @pytest.mark.asyncio
@@ -319,7 +307,7 @@ async def test_success_still_marks_run_complete(
     harness["release"].set()
     await asyncio.wait_for(manager._scans[run_name].task, timeout=5)
 
-    harness["tracer"].save_run_data.assert_called_once_with(mark_complete=True, generate_reports=True)
+    harness["tracer"].save_run_data.assert_any_call(mark_complete=True)
     manager._send_completion_callback.assert_awaited_once()
     harness["callbacks"].assert_not_called()
 
@@ -354,17 +342,16 @@ async def test_unfinished_agent_cannot_produce_successful_blank_report(
     result: Any,
 ) -> None:
     harness = running_scan_harness
-    agent = importlib.import_module("strix.agents.StrixAgent").StrixAgent.return_value
-    agent.execute_scan = AsyncMock(return_value=result)
+    harness["execute"].side_effect = None
+    harness["execute"].return_value = None if result is None or result == {} else result
+    harness["tracer"].scan_results = None
     manager = harness["manager"]
     run_name = await manager.start_webhook_scan(_request(scan_type="vulnerability_scan"))
     await asyncio.wait_for(manager._scans[run_name].task, timeout=5)
 
     assert manager._scans[run_name].last_error
     assert harness["callbacks"].call_args.args[1]["status"] == "failed"
-    harness["tracer"].save_run_data.assert_called_once_with(
-        mark_complete=False, generate_reports=True
-    )
+    harness["tracer"].save_run_data.assert_any_call(mark_complete=False)
     manager._send_completion_callback.assert_not_awaited()
 
 

@@ -32,14 +32,18 @@ sqlmap -u "https://example.com/page?id=1"
 ### Code Analysis
 
 ```bash
-# Search for secrets
-trufflehog filesystem ./
-
-# Static analysis
+# Fast SAST triage
 semgrep --config auto ./src
 
-# Grep for patterns
-grep -r "password" ./
+# Structural AST search
+sg scan ./src
+
+# Secret detection
+gitleaks detect --source ./
+trufflehog filesystem ./
+
+# Supply-chain and misconfiguration checks
+trivy fs ./
 ```
 
 ### Custom Scripts

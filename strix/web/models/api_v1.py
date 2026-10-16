@@ -37,6 +37,7 @@ class ScanRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     scan_id: str
+    model: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_./:-]{0,199}$")
     scan_type: Literal["vulnerability_scan", "penetration_test"]
     target_url: HttpUrl | None = None
     target_urls: list[HttpUrl] = Field(

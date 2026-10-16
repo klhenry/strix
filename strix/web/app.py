@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -13,6 +13,10 @@ from fastapi.templating import Jinja2Templates
 
 from strix.web.services.run_store import RunStore
 from strix.web.services.scan_manager import ScanManager
+
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -24,7 +28,7 @@ def create_app(strix_runs_dir: Path | None = None) -> FastAPI:
     scan_manager = ScanManager(run_store)
 
     @asynccontextmanager
-    async def lifespan(_app: FastAPI):
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         try:
             yield
         finally:
@@ -38,9 +42,9 @@ def create_app(strix_runs_dir: Path | None = None) -> FastAPI:
     templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
     # Store on app state for route access
-    app.state.run_store = run_store  # type: ignore[attr-defined]
-    app.state.scan_manager = scan_manager  # type: ignore[attr-defined]
-    app.state.templates = templates  # type: ignore[attr-defined]
+    app.state.run_store = run_store
+    app.state.scan_manager = scan_manager
+    app.state.templates = templates
 
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
@@ -100,8 +104,7 @@ def run_server(
     # standalone mode is set before any tool modules are imported.  Without
     # this, create_vulnerability_report and finish_scan are silently excluded
     # from the tool registry and the agent can never report findings.
-    os.environ.setdefault("STRIX_SANDBOX_MODE", "true")
-    os.environ.setdefault("STRIX_STANDALONE", "true")
+    os.environ.setdefault("STRIX_RUNTIME_BACKEND", "railway")
 
     _load_strix_config()
     port = int(os.environ.get("PORT", str(port)))

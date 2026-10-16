@@ -2,14 +2,19 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from strix.reporting.evidence import collect_evidence, encode_evidence_base64
-from strix.reporting.models import ScanReport
 from strix.reporting.svg_charts import cvss_gauge, severity_bar_chart
 from strix.utils.resource_paths import get_strix_resource_path
+
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from strix.reporting.models import ScanReport
 
 
 logger = logging.getLogger(__name__)
@@ -59,9 +64,7 @@ def generate_html_report(
     if logo_path.exists():
         import base64
 
-        logo_b64 = base64.b64encode(
-            logo_path.read_bytes()
-        ).decode("ascii")
+        logo_b64 = base64.b64encode(logo_path.read_bytes()).decode("ascii")
     else:
         logo_b64 = ""
 

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
-from strix.reporting.models import ScanReport
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from strix.reporting.models import ScanReport
 
 
 def generate_json_summary(report: ScanReport, output_path: Path) -> Path:
@@ -23,9 +27,7 @@ def generate_json_summary(report: ScanReport, output_path: Path) -> Path:
             "severity_counts": report.severity_counts,
             "average_cvss": report.average_cvss,
         },
-        "vulnerabilities": [
-            _serialize_vulnerability(v) for v in report.vulnerabilities
-        ],
+        "vulnerabilities": [_serialize_vulnerability(v) for v in report.vulnerabilities],
         "executive_summary": report.executive_summary,
         "methodology": report.methodology,
         "technical_analysis": report.technical_analysis,
@@ -39,7 +41,7 @@ def generate_json_summary(report: ScanReport, output_path: Path) -> Path:
     return output_path
 
 
-def _serialize_vulnerability(v: object) -> dict:
+def _serialize_vulnerability(v: object) -> dict[str, Any]:
     """Serialize a VulnerabilityReport to a plain dict."""
     from strix.reporting.models import VulnerabilityReport
 

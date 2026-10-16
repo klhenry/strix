@@ -29,9 +29,7 @@ def severity_bar_chart(counts: dict[str, int], width: int = 500, height: int = 4
         )
 
     parts: list[str] = []
-    parts.append(
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height + 24}">'
-    )
+    parts.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height + 24}">')
     # Background
     parts.append(f'<rect width="{width}" height="{height}" rx="6" fill="#f3f4f6"/>')
 
@@ -78,8 +76,7 @@ def severity_bar_chart(counts: dict[str, int], width: int = 500, height: int = 4
         color = SEVERITY_COLORS[sev]
         dot_y = legend_y - 8
         parts.append(
-            f'<rect x="{legend_x:.1f}" y="{dot_y}"'
-            f' width="10" height="10" rx="2" fill="{color}"/>'
+            f'<rect x="{legend_x:.1f}" y="{dot_y}" width="10" height="10" rx="2" fill="{color}"/>'
         )
         parts.append(
             f'<text x="{legend_x + 14:.1f}" y="{legend_y + 1}" '
@@ -119,8 +116,7 @@ def cvss_gauge(score: float, size: int = 60) -> str:
     svg_h = size // 2 + 16
     sw = stroke_width
     parts: list[str] = [
-        f'<svg xmlns="http://www.w3.org/2000/svg"'
-        f' width="{size}" height="{svg_h}">',
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{svg_h}">',
         f'<path d="{bg_path}" fill="none" stroke="#e5e7eb"'
         f' stroke-width="{sw}" stroke-linecap="round"/>',
         f'<path d="{score_path}" fill="none" stroke="{color}"'

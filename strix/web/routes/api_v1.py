@@ -11,6 +11,7 @@ from strix.web.models.api_v1 import (
     ScanStatusResponse,
 )
 
+
 router = APIRouter(prefix="/api/v1", tags=["api_v1"])
 
 

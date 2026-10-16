@@ -25,7 +25,8 @@
             "pages": [
               "usage/cli",
               "usage/scan-modes",
-              "usage/instructions"
+              "usage/instructions",
+              "usage/viewer"
             ]
           },
           {
@@ -35,9 +36,11 @@
               "llm-providers/openai",
               "llm-providers/anthropic",
               "llm-providers/openrouter",
+              "llm-providers/vercel-ai-gateway",
               "llm-providers/vertex",
               "llm-providers/bedrock",
               "llm-providers/azure",
+              "llm-providers/novita",
               "llm-providers/local"
             ]
           },
@@ -45,7 +48,9 @@
             "group": "Integrations",
             "pages": [
               "integrations/github-actions",
-              "integrations/ci-cd"
+              "integrations/ci-cd",
+              "integrations/coding-agents",
+              "integrations/mcp"
             ]
           },
           {
@@ -74,7 +79,8 @@
           {
             "group": "Strix Cloud",
             "pages": [
-              "cloud/overview"
+              "cloud/overview",
+              "cloud/cli"
             ]
           }
         ]

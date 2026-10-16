@@ -152,10 +152,7 @@ class ScanReport(BaseModel):
     def from_tracer(cls, tracer: Any) -> ScanReport:
         scan_config = tracer.scan_config or {}
         raw_targets = tracer.run_metadata.get("targets", [])
-        targets = [
-            (t["original"] if isinstance(t, dict) else str(t))
-            for t in raw_targets
-        ]
+        targets = [(t["original"] if isinstance(t, dict) else str(t)) for t in raw_targets]
         metadata = ScanMetadata(
             run_id=tracer.run_id,
             run_name=tracer.run_name,

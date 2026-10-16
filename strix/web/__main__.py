@@ -3,6 +3,7 @@
 import os
 import warnings
 
+
 # The web server runs scans locally (no Docker-in-Docker), so configure
 # standalone mode BEFORE any tool modules are imported.  Tool registration
 # happens at import time via @register_tool decorators — if these env vars
@@ -18,6 +19,7 @@ warnings.filterwarnings("ignore", category=SyntaxWarning, module=r"textblob\._te
 warnings.filterwarnings("ignore", message="Unable to find acceptable character detection")
 
 from strix.web import run_server
+
 
 if __name__ == "__main__":
     import argparse

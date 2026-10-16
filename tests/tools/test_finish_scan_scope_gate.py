@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from strix.tools.finish import finish_actions as fa
+from strix.accountable import coverage as fa
 
 
 TWO_APP_SCAN_CONFIG: dict[str, Any] = {
@@ -59,9 +59,6 @@ def _reset_state(monkeypatch):
     monkeypatch.setattr(fa, "_zero_findings_warned", set())
     monkeypatch.setattr(fa, "_incomplete_coverage_warned", set())
     monkeypatch.setattr(fa, "_finish_scan_attempts", {})
-    from strix.tools.agents_graph import agents_graph_actions as ag
-
-    monkeypatch.setattr(ag, "_agent_graph", {"nodes": {}, "edges": []})
 
 
 def _root_state() -> Any:
@@ -69,9 +66,9 @@ def _root_state() -> Any:
 
 
 def _install_tracer(monkeypatch, tracer: _FakeTracer) -> None:
-    import strix.telemetry.tracer as tracer_mod
+    import strix.report.state as tracer_mod
 
-    monkeypatch.setattr(tracer_mod, "get_global_tracer", lambda: tracer)
+    monkeypatch.setattr(tracer_mod, "get_global_report_state", lambda: tracer)
 
 
 def _coverage(*entries: str) -> str:
@@ -865,34 +862,3 @@ def test_subagent_cannot_call_finish_scan(monkeypatch) -> None:
     )
     assert result["success"] is False
     assert result["error"] == "finish_scan_wrong_agent"
-
-
-def test_inactive_agent_wave_resets_force_stop_attempt_counter(monkeypatch) -> None:
-    from strix.tools.agents_graph import agents_graph_actions as ag
-
-    state = _root_state()
-    monkeypatch.setattr(
-        ag,
-        "_agent_graph",
-        {"nodes": {"child": {
-            "status": "running", "name": "child", "task": "work", "parent_id": state.agent_id,
-        }}},
-    )
-    first = fa._check_active_agents(state)
-    assert first is not None
-    assert first["error"] == "agents_still_active"
-    assert fa._finish_scan_attempts[state.agent_id] == 1
-
-    ag._agent_graph["nodes"].clear()
-    assert fa._check_active_agents(state) is None
-    assert state.agent_id not in fa._finish_scan_attempts
-
-    ag._agent_graph["nodes"]["next-child"] = {
-        "status": "running",
-        "name": "next-child",
-        "task": "more work",
-        "parent_id": state.agent_id,
-    }
-    next_wave = fa._check_active_agents(state)
-    assert next_wave is not None
-    assert "attempt 1/" in next_wave["message"]

@@ -5,7 +5,7 @@ on:
     paths:
       - Dockerfile
       - pyproject.toml
-      - poetry.lock
+      - uv.lock
       - strix/**
       - .github/workflows/container-build.yml
   workflow_dispatch:

@@ -83,7 +83,11 @@ class RunStore:
                 if marker in content:
                     start = content.index(marker) + len(marker)
                     next_section = content.find("\n# ", start)
-                    text = content[start:next_section].strip() if next_section > 0 else content[start:].strip()
+                    text = (
+                        content[start:next_section].strip()
+                        if next_section > 0
+                        else content[start:].strip()
+                    )
                     if attr == "exec_summary":
                         exec_summary = text
                     elif attr == "methodology":
@@ -107,7 +111,11 @@ class RunStore:
     def get_report_path(self, run_name: str, fmt: str) -> Path | None:
         run_dir = self.runs_dir / run_name
         name_map: dict[str, list[str]] = {
-            "html": ["vulnerability_scan_report.html", "penetration_test_report.html", "report.html"],
+            "html": [
+                "vulnerability_scan_report.html",
+                "penetration_test_report.html",
+                "report.html",
+            ],
             "pdf": ["vulnerability_scan_report.pdf", "penetration_test_report.pdf", "report.pdf"],
             "json": ["report.json"],
             "sarif": ["results.sarif"],
@@ -126,7 +134,13 @@ class RunStore:
         start_time = ""
         end_time: str | None = None
         targets: list[str] = []
-        severity_counts: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+        severity_counts: dict[str, int] = {
+            "critical": 0,
+            "high": 0,
+            "medium": 0,
+            "low": 0,
+            "info": 0,
+        }
         vuln_count = 0
 
         if events_file.exists():
@@ -150,8 +164,7 @@ class RunStore:
                         start_time = meta.get("start_time", evt.get("timestamp", ""))
                         raw_targets = meta.get("targets", [])
                         targets = [
-                            (t["original"] if isinstance(t, dict) else str(t))
-                            for t in raw_targets
+                            (t["original"] if isinstance(t, dict) else str(t)) for t in raw_targets
                         ]
                     elif evt_type == "run.configured":
                         cfg = (evt.get("payload") or {}).get("scan_config", {})
@@ -178,7 +191,10 @@ class RunStore:
 
         available_reports: list[str] = []
         for fmt, names in [
-            ("html", ["vulnerability_scan_report.html", "penetration_test_report.html", "report.html"]),
+            (
+                "html",
+                ["vulnerability_scan_report.html", "penetration_test_report.html", "report.html"],
+            ),
             ("pdf", ["vulnerability_scan_report.pdf", "penetration_test_report.pdf", "report.pdf"]),
             ("json", ["report.json"]),
             ("sarif", ["results.sarif"]),

@@ -1,35 +1,31 @@
 import ipaddress
 import json
+import logging
+import os
 import re
 import secrets
 import shutil
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.parse import parse_qs, urlparse
 
-import docker
-from docker.errors import DockerException, ImageNotFound
+import requests
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-
-# Token formatting utilities
-def format_token_count(count: float) -> str:
-    count = int(count)
-    if count >= 1_000_000:
-        return f"{count / 1_000_000:.1f}M"
-    if count >= 1_000:
-        return f"{count / 1_000:.1f}K"
-    return str(count)
+from strix.config import load_settings
+from strix.telemetry import report_error
+from strix.utils.api_spec import detect_spec_format
 
 
-# Display utilities
+logger = logging.getLogger(__name__)
+
+
 def get_severity_color(severity: str) -> str:
     severity_colors = {
         "critical": "#dc2626",
@@ -53,8 +49,16 @@ def get_cvss_color(cvss_score: float) -> str:
     return "#6b7280"
 
 
-def format_vulnerability_report(report: dict[str, Any]) -> Text:  # noqa: PLR0912, PLR0915
-    """Format a vulnerability report for CLI display with all rich fields."""
+def format_token_count(count: float | None) -> str:
+    value = int(count or 0)
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.1f}M"
+    if value >= 1_000:
+        return f"{value / 1_000:.1f}K"
+    return str(value)
+
+
+def format_vulnerability_report(report: dict[str, Any]) -> Text:  # noqa: PLR0915
     field_style = "bold #4ade80"
 
     text = Text()
@@ -127,6 +131,27 @@ def format_vulnerability_report(report: dict[str, Any]) -> Text:  # noqa: PLR091
         if cvss_parts:
             text.append("CVSS Vector: ", style=field_style)
             text.append("/".join(cvss_parts), style="dim")
+
+    dependency_metadata = report.get("dependency_metadata") or {}
+    if dependency_metadata:
+        contextual_vector = dependency_metadata.get("contextual_cvss_vector")
+        if contextual_vector:
+            text.append("\n\n")
+            text.append("Contextual CVSS Vector: ", style=field_style)
+            text.append(contextual_vector, style="dim")
+
+        advisory_cvss = dependency_metadata.get("advisory_cvss")
+        if advisory_cvss is not None and advisory_cvss != report.get("cvss"):
+            text.append("\n\n")
+            text.append("Advisory CVSS: ", style=field_style)
+            text.append(f"{float(advisory_cvss):.1f}", style="dim")
+
+        contextual_reasoning = dependency_metadata.get("contextual_cvss_reasoning")
+        if contextual_reasoning:
+            text.append("\n\n")
+            text.append("Contextual CVSS Reasoning", style=field_style)
+            text.append("\n")
+            text.append(contextual_reasoning)
 
     description = report.get("description")
     if description:
@@ -202,13 +227,12 @@ def format_vulnerability_report(report: dict[str, Any]) -> Text:  # noqa: PLR091
     return text
 
 
-def _build_vulnerability_stats(stats_text: Text, tracer: Any) -> None:
-    """Build vulnerability section of stats text."""
-    vuln_count = len(tracer.vulnerability_reports)
+def _build_vulnerability_stats(stats_text: Text, report_state: Any) -> None:
+    vuln_count = len(report_state.vulnerability_reports)
 
     if vuln_count > 0:
         severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
-        for report in tracer.vulnerability_reports:
+        for report in report_state.vulnerability_reports:
             severity = report.get("severity", "").lower()
             if severity in severity_counts:
                 severity_counts[severity] += 1
@@ -241,82 +265,139 @@ def _build_vulnerability_stats(stats_text: Text, tracer: Any) -> None:
         stats_text.append("\n")
 
 
-def _build_llm_stats(stats_text: Text, total_stats: dict[str, Any]) -> None:
-    """Build LLM usage section of stats text."""
-    if total_stats["requests"] > 0:
-        stats_text.append("\n")
-        stats_text.append("Input Tokens ", style="dim")
-        stats_text.append(format_token_count(total_stats["input_tokens"]), style="white")
+def _llm_usage(report_state: Any) -> dict[str, Any]:
+    if hasattr(report_state, "get_total_llm_usage"):
+        usage = report_state.get_total_llm_usage()
+        return usage if isinstance(usage, dict) else {}
+    usage = getattr(report_state, "run_record", {}).get("llm_usage")
+    return usage if isinstance(usage, dict) else {}
 
-        if total_stats["cached_tokens"] > 0:
-            stats_text.append("  ·  ", style="dim white")
-            stats_text.append("Cached Tokens ", style="dim")
-            stats_text.append(format_token_count(total_stats["cached_tokens"]), style="white")
 
-        stats_text.append("  ·  ", style="dim white")
-        stats_text.append("Output Tokens ", style="dim")
-        stats_text.append(format_token_count(total_stats["output_tokens"]), style="white")
+def is_subscription_run(report_state: Any) -> bool:
+    """Whether this run uses a model subscription (no metered cost).
 
-        if total_stats["cost"] > 0:
-            stats_text.append(" · ", style="dim white")
-            stats_text.append("Cost ", style="dim")
-            stats_text.append(f"${total_stats['cost']:.4f}", style="bold #fbbf24")
-    else:
+    Prefers the run record so it's correct for hydrated/resumed runs; falls back
+    to current settings.
+    """
+    record = getattr(report_state, "run_record", None)
+    if isinstance(record, dict) and record.get("auth_mode"):
+        return record.get("auth_mode") == "subscription"
+    from strix.config import codex
+
+    return codex.auth_mode(load_settings().llm.model) == "subscription"
+
+
+def _int_stat(usage: dict[str, Any], key: str) -> int:
+    try:
+        return max(0, int(usage.get(key) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _float_stat(usage: dict[str, Any], key: str) -> float:
+    try:
+        value = float(usage.get(key) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    return value if value > 0 else 0.0
+
+
+def _detail_value(usage: dict[str, Any], detail_key: str, value_key: str) -> int:
+    details = usage.get(detail_key)
+    if isinstance(details, list):
+        details = details[0] if details and isinstance(details[0], dict) else {}
+    if not isinstance(details, dict):
+        return 0
+    return _int_stat(details, value_key)
+
+
+def has_model_response(report_state: Any) -> bool:
+    usage = _llm_usage(report_state)
+    return bool(usage) and _int_stat(usage, "requests") > 0
+
+
+def _build_llm_usage_stats(
+    stats_text: Text,
+    report_state: Any,
+    *,
+    live: bool = False,
+) -> None:
+    subscription = is_subscription_run(report_state)
+    usage = _llm_usage(report_state)
+    if not usage or _int_stat(usage, "requests") <= 0:
         stats_text.append("\n")
         stats_text.append("Cost ", style="dim")
-        stats_text.append("$0.0000 ", style="#fbbf24")
+        if subscription:
+            stats_text.append("$0.00 ", style="#22c55e")
+            stats_text.append("(subscription) ", style="dim")
+        else:
+            stats_text.append("$0.0000 ", style="#fbbf24")
         stats_text.append("· ", style="dim white")
         stats_text.append("Tokens ", style="dim")
         stats_text.append("0", style="white")
+        return
+
+    input_tokens = _int_stat(usage, "input_tokens")
+    output_tokens = _int_stat(usage, "output_tokens")
+    cached_tokens = _detail_value(usage, "input_tokens_details", "cached_tokens")
+    cost = _float_stat(usage, "cost")
+
+    stats_text.append("\n")
+    stats_text.append("Input Tokens ", style="dim")
+    stats_text.append(format_token_count(input_tokens), style="white")
+
+    if live or cached_tokens > 0:
+        stats_text.append("  ·  ", style="dim white")
+        stats_text.append("Cached Tokens ", style="dim")
+        stats_text.append(format_token_count(cached_tokens), style="white")
+
+    separator = "\n" if live else "  ·  "
+    stats_text.append(separator, style="dim white")
+    stats_text.append("Output Tokens ", style="dim")
+    stats_text.append(format_token_count(output_tokens), style="white")
+
+    if subscription:
+        stats_text.append("  ·  ", style="dim white")
+        stats_text.append("Cost ", style="dim")
+        stats_text.append("$0.00", style="#22c55e")
+        stats_text.append(" (subscription)", style="dim")
+    elif live or cost > 0:
+        stats_text.append("  ·  ", style="dim white")
+        stats_text.append("Cost ", style="dim")
+        stats_text.append(f"${cost:.4f}", style="#fbbf24")
 
 
-def build_final_stats_text(tracer: Any) -> Text:
-    """Build stats text for final output with detailed messages and LLM usage."""
+def build_final_stats_text(report_state: Any) -> Text:
     stats_text = Text()
-    if not tracer:
+    if not report_state:
         return stats_text
 
-    _build_vulnerability_stats(stats_text, tracer)
-
-    tool_count = tracer.get_real_tool_count()
-    agent_count = len(tracer.agents)
-
-    stats_text.append("Agents", style="dim")
-    stats_text.append("  ")
-    stats_text.append(str(agent_count), style="bold white")
-    stats_text.append("  ·  ", style="dim white")
-    stats_text.append("Tools", style="dim")
-    stats_text.append("  ")
-    stats_text.append(str(tool_count), style="bold white")
-
-    llm_stats = tracer.get_total_llm_stats()
-    _build_llm_stats(stats_text, llm_stats["total"])
+    _build_vulnerability_stats(stats_text, report_state)
+    _build_llm_usage_stats(stats_text, report_state)
 
     return stats_text
 
 
-def build_live_stats_text(tracer: Any, agent_config: dict[str, Any] | None = None) -> Text:
+def build_live_stats_text(report_state: Any) -> Text:
     stats_text = Text()
-    if not tracer:
+    if not report_state:
         return stats_text
 
-    if agent_config:
-        llm_config = agent_config["llm_config"]
-        model = getattr(llm_config, "model_name", "Unknown")
-        stats_text.append("Model ", style="dim")
-        stats_text.append(model, style="white")
-        stats_text.append("\n")
+    model = load_settings().llm.model or "unknown"
+    stats_text.append("Model ", style="dim")
+    stats_text.append(str(model), style="white")
+    if is_subscription_run(report_state):
+        stats_text.append("  ·  ", style="dim white")
+        stats_text.append("ChatGPT subscription", style="#22c55e")
+    stats_text.append("\n")
 
-    vuln_count = len(tracer.vulnerability_reports)
-    tool_count = tracer.get_real_tool_count()
-    agent_count = len(tracer.agents)
-
+    vuln_count = len(report_state.vulnerability_reports)
     stats_text.append("Vulnerabilities ", style="dim")
     stats_text.append(f"{vuln_count}", style="white")
     stats_text.append("\n")
     if vuln_count > 0:
         severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
-        for report in tracer.vulnerability_reports:
+        for report in report_state.vulnerability_reports:
             severity = report.get("severity", "").lower()
             if severity in severity_counts:
                 severity_counts[severity] += 1
@@ -338,68 +419,45 @@ def build_live_stats_text(tracer: Any, agent_config: dict[str, Any] | None = Non
 
         stats_text.append("\n")
 
-    stats_text.append("Agents ", style="dim")
-    stats_text.append(str(agent_count), style="white")
-    stats_text.append("  ·  ", style="dim white")
-    stats_text.append("Tools ", style="dim")
-    stats_text.append(str(tool_count), style="white")
-
-    llm_stats = tracer.get_total_llm_stats()
-    total_stats = llm_stats["total"]
-
-    stats_text.append("\n")
-
-    stats_text.append("Input Tokens ", style="dim")
-    stats_text.append(format_token_count(total_stats["input_tokens"]), style="white")
-
-    stats_text.append("  ·  ", style="dim white")
-    stats_text.append("Cached Tokens ", style="dim")
-    stats_text.append(format_token_count(total_stats["cached_tokens"]), style="white")
-
-    stats_text.append("\n")
-
-    stats_text.append("Output Tokens ", style="dim")
-    stats_text.append(format_token_count(total_stats["output_tokens"]), style="white")
-
-    stats_text.append("  ·  ", style="dim white")
-    stats_text.append("Cost ", style="dim")
-    stats_text.append(f"${total_stats['cost']:.4f}", style="#fbbf24")
+    _build_llm_usage_stats(stats_text, report_state, live=True)
 
     return stats_text
 
 
-def build_tui_stats_text(tracer: Any, agent_config: dict[str, Any] | None = None) -> Text:
+def build_tui_stats_text(report_state: Any) -> Text:
     stats_text = Text()
-    if not tracer:
+    if not report_state:
         return stats_text
 
-    if agent_config:
-        llm_config = agent_config["llm_config"]
-        model = getattr(llm_config, "model_name", "Unknown")
-        stats_text.append(model, style="white")
-
-    llm_stats = tracer.get_total_llm_stats()
-    total_stats = llm_stats["total"]
-
-    total_tokens = total_stats["input_tokens"] + total_stats["output_tokens"]
-    if total_tokens > 0:
+    model = load_settings().llm.model or "unknown"
+    stats_text.append(str(model), style="white")
+    subscription = is_subscription_run(report_state)
+    if subscription:
         stats_text.append("\n")
-        stats_text.append(f"{format_token_count(total_tokens)} tokens", style="white")
+        stats_text.append("ChatGPT subscription", style="#22c55e")
 
-    if total_stats["cost"] > 0:
-        stats_text.append(" · ", style="white")
-        stats_text.append(f"${total_stats['cost']:.2f}", style="white")
+    usage = _llm_usage(report_state)
+    if usage and _int_stat(usage, "total_tokens") > 0:
+        stats_text.append("\n")
+        stats_text.append(
+            f"{format_token_count(_int_stat(usage, 'total_tokens'))} tokens",
+            style="white",
+        )
+        cost = _float_stat(usage, "cost")
+        if subscription:
+            stats_text.append(" · ", style="white")
+            stats_text.append("$0.00", style="white")
+        elif cost > 0:
+            stats_text.append(" · ", style="white")
+            stats_text.append(f"${cost:.2f}", style="white")
 
-    caido_url = getattr(tracer, "caido_url", None)
+    caido_url = getattr(report_state, "caido_url", None)
     if caido_url:
         stats_text.append("\n")
         stats_text.append("Caido: ", style="bold white")
         stats_text.append(caido_url, style="white")
 
     return stats_text
-
-
-# Name generation utilities
 
 
 def _slugify_for_run_name(text: str, max_length: int = 32) -> str:
@@ -425,7 +483,7 @@ def _derive_target_label_for_run_name(targets_info: list[dict[str, Any]] | None)
         try:
             parsed = urlparse(url)
             return str(parsed.netloc or parsed.path or url)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return str(url)
 
     if target_type == "repository":
@@ -441,11 +499,20 @@ def _derive_target_label_for_run_name(targets_info: list[dict[str, Any]] | None)
         path_str = details.get("target_path", original)
         try:
             return str(Path(path_str).name or path_str)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return str(path_str)
 
     if target_type == "ip_address":
         return str(details.get("target_ip", original) or original)
+
+    if target_type == "api_spec":
+        if details.get("source") == "postman_api":
+            return "postman-collection"
+        spec_path = details.get("target_spec", original)
+        try:
+            return str(Path(spec_path).stem or spec_path)
+        except Exception:
+            return str(spec_path)
 
     return str(original or "pentest")
 
@@ -459,22 +526,611 @@ def generate_run_name(targets_info: list[dict[str, Any]] | None = None) -> str:
     return f"{slug}_{random_suffix}"
 
 
-# Target processing utilities
+_SUPPORTED_SCOPE_MODES = {"auto", "diff", "full"}
+_MAX_FILES_PER_SECTION = 120
+
+
+@dataclass
+class DiffEntry:
+    status: str
+    path: str
+    old_path: str | None = None
+    similarity: int | None = None
+
+
+@dataclass
+class RepoDiffScope:
+    source_path: str
+    workspace_subdir: str | None
+    base_ref: str
+    merge_base: str
+    added_files: list[str]
+    modified_files: list[str]
+    renamed_files: list[dict[str, Any]]
+    deleted_files: list[str]
+    analyzable_files: list[str]
+    truncated_sections: dict[str, bool] = field(default_factory=dict)
+
+    def to_metadata(self) -> dict[str, Any]:
+        return {
+            "source_path": self.source_path,
+            "workspace_subdir": self.workspace_subdir,
+            "base_ref": self.base_ref,
+            "merge_base": self.merge_base,
+            "added_files": self.added_files,
+            "modified_files": self.modified_files,
+            "renamed_files": self.renamed_files,
+            "deleted_files": self.deleted_files,
+            "analyzable_files": self.analyzable_files,
+            "added_files_count": len(self.added_files),
+            "modified_files_count": len(self.modified_files),
+            "renamed_files_count": len(self.renamed_files),
+            "deleted_files_count": len(self.deleted_files),
+            "analyzable_files_count": len(self.analyzable_files),
+            "truncated_sections": self.truncated_sections,
+        }
+
+
+@dataclass
+class DiffScopeResult:
+    active: bool
+    mode: str
+    instruction_block: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+def _run_git_command(
+    repo_path: Path, args: list[str], check: bool = True
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603
+        ["git", "-C", str(repo_path), *args],  # noqa: S607
+        capture_output=True,
+        text=True,
+        check=check,
+    )
+
+
+def _run_git_command_raw(
+    repo_path: Path, args: list[str], check: bool = True
+) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(  # noqa: S603
+        ["git", "-C", str(repo_path), *args],  # noqa: S607
+        capture_output=True,
+        check=check,
+    )
+
+
+def _is_ci_environment(env: dict[str, str]) -> bool:
+    return any(
+        env.get(key)
+        for key in (
+            "CI",
+            "GITHUB_ACTIONS",
+            "GITLAB_CI",
+            "JENKINS_URL",
+            "BUILDKITE",
+            "CIRCLECI",
+        )
+    )
+
+
+def _is_pr_environment(env: dict[str, str]) -> bool:
+    return any(
+        env.get(key)
+        for key in (
+            "GITHUB_BASE_REF",
+            "GITHUB_HEAD_REF",
+            "CI_MERGE_REQUEST_TARGET_BRANCH_NAME",
+            "GITLAB_MERGE_REQUEST_TARGET_BRANCH_NAME",
+            "SYSTEM_PULLREQUEST_TARGETBRANCH",
+        )
+    )
+
+
+def _is_git_repo(repo_path: Path) -> bool:
+    result = _run_git_command(repo_path, ["rev-parse", "--is-inside-work-tree"], check=False)
+    return result.returncode == 0 and result.stdout.strip().lower() == "true"
+
+
+def _is_repo_shallow(repo_path: Path) -> bool:
+    result = _run_git_command(repo_path, ["rev-parse", "--is-shallow-repository"], check=False)
+    if result.returncode == 0:
+        value = result.stdout.strip().lower()
+        if value in {"true", "false"}:
+            return value == "true"
+
+    git_meta = repo_path / ".git"
+    if git_meta.is_dir():
+        return (git_meta / "shallow").exists()
+    if git_meta.is_file():
+        try:
+            content = git_meta.read_text(encoding="utf-8").strip()
+        except OSError:
+            return False
+        if content.startswith("gitdir:"):
+            git_dir = content.split(":", 1)[1].strip()
+            resolved = (repo_path / git_dir).resolve()
+            return (resolved / "shallow").exists()
+    return False
+
+
+def _git_ref_exists(repo_path: Path, ref: str) -> bool:
+    result = _run_git_command(repo_path, ["rev-parse", "--verify", "--quiet", ref], check=False)
+    return result.returncode == 0
+
+
+def _resolve_origin_head_ref(repo_path: Path) -> str | None:
+    result = _run_git_command(
+        repo_path, ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"], check=False
+    )
+    if result.returncode != 0:
+        return None
+    ref = result.stdout.strip()
+    return ref or None
+
+
+def _extract_branch_name(ref: str | None) -> str | None:
+    if not ref:
+        return None
+    value = ref.strip()
+    if not value:
+        return None
+    return value.split("/")[-1]
+
+
+def _extract_github_base_sha(env: dict[str, str]) -> str | None:
+    event_path = env.get("GITHUB_EVENT_PATH", "").strip()
+    if not event_path:
+        return None
+
+    path = Path(event_path)
+    if not path.exists():
+        return None
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+    base_sha = payload.get("pull_request", {}).get("base", {}).get("sha")
+    if isinstance(base_sha, str) and base_sha.strip():
+        return base_sha.strip()
+    return None
+
+
+def _resolve_default_branch_name(repo_path: Path, env: dict[str, str]) -> str | None:
+    github_base_ref = env.get("GITHUB_BASE_REF", "").strip()
+    if github_base_ref:
+        return github_base_ref
+
+    origin_head = _resolve_origin_head_ref(repo_path)
+    if origin_head:
+        branch = _extract_branch_name(origin_head)
+        if branch:
+            return branch
+
+    if _git_ref_exists(repo_path, "refs/remotes/origin/main"):
+        return "main"
+    if _git_ref_exists(repo_path, "refs/remotes/origin/master"):
+        return "master"
+
+    return None
+
+
+def _resolve_base_ref(repo_path: Path, diff_base: str | None, env: dict[str, str]) -> str:
+    if diff_base and diff_base.strip():
+        return diff_base.strip()
+
+    github_base_ref = env.get("GITHUB_BASE_REF", "").strip()
+    if github_base_ref:
+        github_candidate = f"refs/remotes/origin/{github_base_ref}"
+        if _git_ref_exists(repo_path, github_candidate):
+            return github_candidate
+
+    github_base_sha = _extract_github_base_sha(env)
+    if github_base_sha and _git_ref_exists(repo_path, github_base_sha):
+        return github_base_sha
+
+    origin_head = _resolve_origin_head_ref(repo_path)
+    if origin_head and _git_ref_exists(repo_path, origin_head):
+        return origin_head
+
+    if _git_ref_exists(repo_path, "refs/remotes/origin/main"):
+        return "refs/remotes/origin/main"
+
+    if _git_ref_exists(repo_path, "refs/remotes/origin/master"):
+        return "refs/remotes/origin/master"
+
+    raise ValueError(
+        "Unable to resolve a base ref for diff-scope. Pass --diff-base explicitly "
+        "(for example: --diff-base origin/main)."
+    )
+
+
+def _get_current_branch_name(repo_path: Path) -> str | None:
+    result = _run_git_command(repo_path, ["rev-parse", "--abbrev-ref", "HEAD"], check=False)
+    if result.returncode != 0:
+        return None
+    branch_name = result.stdout.strip()
+    if not branch_name or branch_name == "HEAD":
+        return None
+    return branch_name
+
+
+def _parse_name_status_z(raw_output: bytes) -> list[DiffEntry]:
+    if not raw_output:
+        return []
+
+    tokens = [
+        token.decode("utf-8", errors="replace") for token in raw_output.split(b"\x00") if token
+    ]
+    entries: list[DiffEntry] = []
+    index = 0
+
+    while index < len(tokens):
+        token = tokens[index]
+        status_raw = token
+        status_code = status_raw[:1]
+        similarity: int | None = None
+        if len(status_raw) > 1 and status_raw[1:].isdigit():
+            similarity = int(status_raw[1:])
+
+        if status_code in {"R", "C"} and index + 2 < len(tokens):
+            old_path = tokens[index + 1]
+            new_path = tokens[index + 2]
+            entries.append(
+                DiffEntry(
+                    status=status_code,
+                    path=new_path,
+                    old_path=old_path,
+                    similarity=similarity,
+                )
+            )
+            index += 3
+            continue
+
+        if index + 1 < len(tokens):
+            path = tokens[index + 1]
+            entries.append(DiffEntry(status=status_code, path=path, similarity=similarity))
+            index += 2
+            continue
+
+        break
+
+    return entries
+
+
+def _append_unique(container: list[str], seen: set[str], path: str) -> None:
+    if path and path not in seen:
+        seen.add(path)
+        container.append(path)
+
+
+def _classify_diff_entries(entries: list[DiffEntry]) -> dict[str, Any]:
+    added_files: list[str] = []
+    modified_files: list[str] = []
+    deleted_files: list[str] = []
+    renamed_files: list[dict[str, Any]] = []
+    analyzable_files: list[str] = []
+    analyzable_seen: set[str] = set()
+    modified_seen: set[str] = set()
+
+    for entry in entries:
+        path = entry.path
+        if not path:
+            continue
+
+        if entry.status == "D":
+            deleted_files.append(path)
+            continue
+
+        if entry.status == "A":
+            added_files.append(path)
+            _append_unique(analyzable_files, analyzable_seen, path)
+            continue
+
+        if entry.status == "M":
+            _append_unique(modified_files, modified_seen, path)
+            _append_unique(analyzable_files, analyzable_seen, path)
+            continue
+
+        if entry.status == "R":
+            renamed_files.append(
+                {
+                    "old_path": entry.old_path,
+                    "new_path": path,
+                    "similarity": entry.similarity,
+                }
+            )
+            _append_unique(analyzable_files, analyzable_seen, path)
+            if entry.similarity is None or entry.similarity < 100:
+                _append_unique(modified_files, modified_seen, path)
+            continue
+
+        if entry.status == "C":
+            _append_unique(modified_files, modified_seen, path)
+            _append_unique(analyzable_files, analyzable_seen, path)
+            continue
+
+        _append_unique(modified_files, modified_seen, path)
+        _append_unique(analyzable_files, analyzable_seen, path)
+
+    return {
+        "added_files": added_files,
+        "modified_files": modified_files,
+        "deleted_files": deleted_files,
+        "renamed_files": renamed_files,
+        "analyzable_files": analyzable_files,
+    }
+
+
+def _truncate_file_list(
+    files: list[str], max_files: int = _MAX_FILES_PER_SECTION
+) -> tuple[list[str], bool]:
+    if len(files) <= max_files:
+        return files, False
+    return files[:max_files], True
+
+
+def build_diff_scope_instruction(scopes: list[RepoDiffScope]) -> str:
+    lines = [
+        "The user is requesting a review of a Pull Request.",
+        "Instruction: Direct your analysis primarily at the changes in the listed files. "
+        "You may reference other files in the repository for context (imports, definitions, "
+        "usage), but report findings only if they relate to the listed changes.",
+        "For Added files, review the entire file content.",
+        "For Modified files, focus primarily on the changed areas.",
+    ]
+
+    for scope in scopes:
+        repo_name = scope.workspace_subdir or Path(scope.source_path).name or "repository"
+        lines.append("")
+        lines.append(f"Repository Scope: {repo_name}")
+        lines.append(f"Base reference: {scope.base_ref}")
+        lines.append(f"Merge base: {scope.merge_base}")
+
+        focus_files, focus_truncated = _truncate_file_list(scope.analyzable_files)
+        scope.truncated_sections["analyzable_files"] = focus_truncated
+        if focus_files:
+            lines.append("Primary Focus (changed files to analyze):")
+            lines.extend(f"- {path}" for path in focus_files)
+            if focus_truncated:
+                lines.append(f"- ... ({len(scope.analyzable_files) - len(focus_files)} more files)")
+        else:
+            lines.append("Primary Focus: No analyzable changed files detected.")
+
+        added_files, added_truncated = _truncate_file_list(scope.added_files)
+        scope.truncated_sections["added_files"] = added_truncated
+        if added_files:
+            lines.append("Added files (review entire file):")
+            lines.extend(f"- {path}" for path in added_files)
+            if added_truncated:
+                lines.append(f"- ... ({len(scope.added_files) - len(added_files)} more files)")
+
+        modified_files, modified_truncated = _truncate_file_list(scope.modified_files)
+        scope.truncated_sections["modified_files"] = modified_truncated
+        if modified_files:
+            lines.append("Modified files (focus on changes):")
+            lines.extend(f"- {path}" for path in modified_files)
+            if modified_truncated:
+                lines.append(
+                    f"- ... ({len(scope.modified_files) - len(modified_files)} more files)"
+                )
+
+        if scope.renamed_files:
+            rename_lines = []
+            for rename in scope.renamed_files:
+                old_path = rename.get("old_path") or "unknown"
+                new_path = rename.get("new_path") or "unknown"
+                similarity = rename.get("similarity")
+                if isinstance(similarity, int):
+                    rename_lines.append(f"- {old_path} -> {new_path} (similarity {similarity}%)")
+                else:
+                    rename_lines.append(f"- {old_path} -> {new_path}")
+            lines.append("Renamed files:")
+            lines.extend(rename_lines)
+
+        deleted_files, deleted_truncated = _truncate_file_list(scope.deleted_files)
+        scope.truncated_sections["deleted_files"] = deleted_truncated
+        if deleted_files:
+            lines.append("Note: These files were deleted (context only, not analyzable):")
+            lines.extend(f"- {path}" for path in deleted_files)
+            if deleted_truncated:
+                lines.append(f"- ... ({len(scope.deleted_files) - len(deleted_files)} more files)")
+
+    return "\n".join(lines).strip()
+
+
+def _should_activate_auto_scope(
+    local_sources: list[dict[str, str]], non_interactive: bool, env: dict[str, str]
+) -> bool:
+    if not local_sources:
+        return False
+    if not non_interactive:
+        return False
+    if not _is_ci_environment(env):
+        return False
+    if _is_pr_environment(env):
+        return True
+
+    for source in local_sources:
+        source_path = source.get("source_path")
+        if not source_path:
+            continue
+        repo_path = Path(source_path)
+        if not _is_git_repo(repo_path):
+            continue
+        current_branch = _get_current_branch_name(repo_path)
+        default_branch = _resolve_default_branch_name(repo_path, env)
+        if current_branch and default_branch and current_branch != default_branch:
+            return True
+    return False
+
+
+def _resolve_repo_diff_scope(
+    source: dict[str, str], diff_base: str | None, env: dict[str, str]
+) -> RepoDiffScope:
+    source_path = source.get("source_path", "")
+    workspace_subdir = source.get("workspace_subdir")
+    repo_path = Path(source_path)
+
+    if not _is_git_repo(repo_path):
+        raise ValueError(f"Source is not a git repository: {source_path}")
+
+    if _is_repo_shallow(repo_path):
+        raise ValueError(
+            "Strix requires full git history for diff-scope. Please set fetch-depth: 0 "
+            "in your CI config."
+        )
+
+    base_ref = _resolve_base_ref(repo_path, diff_base, env)
+    merge_base_result = _run_git_command(repo_path, ["merge-base", base_ref, "HEAD"], check=False)
+    if merge_base_result.returncode != 0:
+        stderr = merge_base_result.stderr.strip()
+        raise ValueError(
+            f"Unable to compute merge-base against '{base_ref}' for '{source_path}'. "
+            f"{stderr or 'Ensure the base branch history is fetched and reachable.'}"
+        )
+
+    merge_base = merge_base_result.stdout.strip()
+    if not merge_base:
+        raise ValueError(
+            f"Unable to compute merge-base against '{base_ref}' for '{source_path}'. "
+            "Ensure the base branch history is fetched and reachable."
+        )
+
+    diff_result = _run_git_command_raw(
+        repo_path,
+        [
+            "diff",
+            "--name-status",
+            "-z",
+            "--find-renames",
+            "--find-copies",
+            f"{merge_base}...HEAD",
+        ],
+        check=False,
+    )
+    if diff_result.returncode != 0:
+        stderr = diff_result.stderr.decode("utf-8", errors="replace").strip()
+        raise ValueError(
+            f"Unable to resolve changed files for '{source_path}'. "
+            f"{stderr or 'Ensure the repository has enough history for diff-scope.'}"
+        )
+
+    entries = _parse_name_status_z(diff_result.stdout)
+    classified = _classify_diff_entries(entries)
+
+    return RepoDiffScope(
+        source_path=source_path,
+        workspace_subdir=workspace_subdir,
+        base_ref=base_ref,
+        merge_base=merge_base,
+        added_files=classified["added_files"],
+        modified_files=classified["modified_files"],
+        renamed_files=classified["renamed_files"],
+        deleted_files=classified["deleted_files"],
+        analyzable_files=classified["analyzable_files"],
+    )
+
+
+def resolve_diff_scope_context(
+    local_sources: list[dict[str, str]],
+    scope_mode: str,
+    diff_base: str | None,
+    non_interactive: bool,
+    env: dict[str, str] | None = None,
+) -> DiffScopeResult:
+    if scope_mode not in _SUPPORTED_SCOPE_MODES:
+        raise ValueError(f"Unsupported scope mode: {scope_mode}")
+
+    env_map = dict(os.environ if env is None else env)
+
+    if scope_mode == "full":
+        return DiffScopeResult(
+            active=False,
+            mode=scope_mode,
+            metadata={"active": False, "mode": scope_mode},
+        )
+
+    if scope_mode == "auto":
+        should_activate = _should_activate_auto_scope(local_sources, non_interactive, env_map)
+        if not should_activate:
+            return DiffScopeResult(
+                active=False,
+                mode=scope_mode,
+                metadata={"active": False, "mode": scope_mode},
+            )
+
+    if not local_sources:
+        raise ValueError("Diff-scope is active, but no local repository targets were provided.")
+
+    repo_scopes: list[RepoDiffScope] = []
+    skipped_non_git: list[str] = []
+    skipped_diff_scope: list[str] = []
+    for source in local_sources:
+        source_path = source.get("source_path")
+        if not source_path:
+            continue
+        if not _is_git_repo(Path(source_path)):
+            skipped_non_git.append(source_path)
+            continue
+        try:
+            repo_scopes.append(_resolve_repo_diff_scope(source, diff_base, env_map))
+        except ValueError as e:
+            if scope_mode == "auto":
+                skipped_diff_scope.append(f"{source_path} (diff-scope skipped: {e})")
+                continue
+            raise
+
+    if not repo_scopes:
+        if scope_mode == "auto":
+            metadata: dict[str, Any] = {"active": False, "mode": scope_mode}
+            if skipped_non_git:
+                metadata["skipped_non_git_sources"] = skipped_non_git
+            if skipped_diff_scope:
+                metadata["skipped_diff_scope_sources"] = skipped_diff_scope
+            return DiffScopeResult(active=False, mode=scope_mode, metadata=metadata)
+
+        raise ValueError(
+            "Diff-scope is active, but no Git repositories were found. "
+            "Use --scope-mode full to disable diff-scope for this run."
+        )
+
+    instruction_block = build_diff_scope_instruction(repo_scopes)
+    metadata = {
+        "active": True,
+        "mode": scope_mode,
+        "repos": [scope.to_metadata() for scope in repo_scopes],
+        "total_repositories": len(repo_scopes),
+        "total_analyzable_files": sum(len(scope.analyzable_files) for scope in repo_scopes),
+        "total_deleted_files": sum(len(scope.deleted_files) for scope in repo_scopes),
+    }
+    if skipped_non_git:
+        metadata["skipped_non_git_sources"] = skipped_non_git
+    if skipped_diff_scope:
+        metadata["skipped_diff_scope_sources"] = skipped_diff_scope
+
+    return DiffScopeResult(
+        active=True,
+        mode=scope_mode,
+        instruction_block=instruction_block,
+        metadata=metadata,
+    )
 
 
 def _is_http_git_repo(url: str) -> bool:
     check_url = f"{url.rstrip('/')}/info/refs?service=git-upload-pack"
     try:
-        req = Request(check_url, headers={"User-Agent": "git/strix"})  # noqa: S310
-        with urlopen(req, timeout=10) as resp:  # noqa: S310  # nosec B310
+        with requests.get(check_url, headers={"User-Agent": "git/2.43.0"}, timeout=10) as resp:
+            if resp.status_code >= 400:
+                return resp.status_code == 401
             return "x-git-upload-pack-advertisement" in resp.headers.get("Content-Type", "")
-    except HTTPError as e:
-        return e.code == 401
-    except (URLError, OSError, ValueError):
+    except (requests.RequestException, ValueError):
         return False
 
 
-def infer_target_type(target: str) -> tuple[str, dict[str, str]]:  # noqa: PLR0911, PLR0912
+def infer_target_type(target: str) -> tuple[str, dict[str, str]]:  # noqa: PLR0911
     if not target or not isinstance(target, str):
         raise ValueError("Target must be a non-empty string")
 
@@ -487,6 +1143,24 @@ def infer_target_type(target: str) -> tuple[str, dict[str, str]]:  # noqa: PLR09
         return "repository", {"target_repo": target}
 
     parsed = urlparse(target)
+    if parsed.scheme == "postman":
+        collection_uid = f"{parsed.netloc}{parsed.path}".strip("/")
+        if not collection_uid:
+            raise ValueError(
+                f"Missing Postman collection id in '{target}' (expected postman://<collection-uid>)"
+            )
+        details = {
+            "target_spec": target,
+            "spec_format": "postman",
+            "source": "postman_api",
+            "collection_uid": collection_uid,
+        }
+        query = parse_qs(parsed.query)
+        env_uid = (query.get("env") or query.get("environment") or [""])[0].strip()
+        if env_uid:
+            details["environment_uid"] = env_uid
+        return "api_spec", details
+
     if parsed.scheme in ("http", "https"):
         if parsed.username or parsed.password:
             return "repository", {"target_repo": target}
@@ -510,7 +1184,14 @@ def infer_target_type(target: str) -> tuple[str, dict[str, str]]:  # noqa: PLR09
     try:
         if path.exists():
             if path.is_dir():
+                check_mountable_dir(path)
                 return "local_code", {"target_path": str(path.resolve())}
+            spec_format = detect_spec_format(path)
+            if spec_format is not None:
+                return "api_spec", {
+                    "target_spec": str(path.resolve()),
+                    "spec_format": spec_format,
+                }
             raise ValueError(f"Path exists but is not a directory: {target}")
     except (OSError, RuntimeError) as e:
         raise ValueError(f"Invalid path: {target} - {e!s}") from e
@@ -537,9 +1218,38 @@ def infer_target_type(target: str) -> tuple[str, dict[str, str]]:  # noqa: PLR09
         "- A valid URL (http:// or https://)\n"
         "- A Git repository URL (https://host/org/repo or git@host:org/repo.git)\n"
         "- A local directory path\n"
+        "- An API spec file (OpenAPI/Swagger .json/.yaml or a Postman collection)\n"
+        "- A Postman collection by id (postman://<collection-uid>[?env=<environment-uid>], "
+        "needs POSTMAN_API_KEY)\n"
         "- A domain name (e.g., example.com)\n"
         "- An IP address (e.g., 192.168.1.10)"
     )
+
+
+def read_target_list_file(path_str: str) -> list[str]:
+    """Read scan targets from a file, one target per non-empty, non-comment line."""
+    if not path_str or not path_str.strip():
+        raise ValueError("--target-list path must not be empty.")
+
+    path = Path(path_str).expanduser()
+    if not path.is_file():
+        raise ValueError(f"Target list file '{path_str}' is not an existing file.")
+
+    try:
+        targets = [
+            target
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if (target := line.strip()) and not target.startswith("#")
+        ]
+    except UnicodeDecodeError as e:
+        raise ValueError(f"Target list file '{path_str}' must be valid UTF-8 text: {e!s}") from e
+    except OSError as e:
+        raise ValueError(f"Failed to read target list file '{path_str}': {e!s}") from e
+
+    targets = [target for target in targets if target]
+    if not targets:
+        raise ValueError(f"Target list file '{path_str}' is empty.")
+    return targets
 
 
 def sanitize_name(name: str) -> str:
@@ -595,8 +1305,13 @@ def assign_workspace_subdirs(targets_info: list[dict[str, Any]]) -> None:
         details["workspace_subdir"] = workspace_subdir
 
 
-def collect_local_sources(targets_info: list[dict[str, Any]]) -> list[dict[str, str]]:
-    local_sources: list[dict[str, str]] = []
+def is_whitebox_scan(targets_info: list[dict[str, Any]]) -> bool:
+    """True iff any target is a local source tree (whitebox / source-aware)."""
+    return any(t.get("type") == "local_code" for t in targets_info or [])
+
+
+def collect_local_sources(targets_info: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    local_sources: list[dict[str, Any]] = []
 
     for target_info in targets_info:
         details = target_info["details"]
@@ -607,6 +1322,8 @@ def collect_local_sources(targets_info: list[dict[str, Any]]) -> list[dict[str, 
                 {
                     "source_path": details["target_path"],
                     "workspace_subdir": workspace_subdir,
+                    "protect_metadata": True,
+                    "read_only": bool(details.get("read_only")),
                 }
             )
 
@@ -615,10 +1332,127 @@ def collect_local_sources(targets_info: list[dict[str, Any]]) -> list[dict[str, 
                 {
                     "source_path": details["cloned_repo_path"],
                     "workspace_subdir": workspace_subdir,
+                    "protect_metadata": False,
                 }
             )
 
     return local_sources
+
+
+# Refused along with everything under them.
+_FORBIDDEN_MOUNT_TREES = frozenset(
+    {
+        "/bin",
+        "/sbin",
+        "/usr",
+        "/etc",
+        "/lib",
+        "/lib64",
+        "/nix/store",
+        "/run/current-system/sw",
+        "/Applications",
+        "/Library",
+        "/System",
+        "/dev",
+        "/boot",
+        "/proc",
+        "/sys",
+    }
+)
+
+# Refused themselves, but they hold projects too, so their contents are fine.
+_FORBIDDEN_MOUNT_ROOTS = frozenset(
+    {
+        "/",
+        "/private",
+        "/var",
+        "/opt",
+        "/home",
+        "/root",
+        "/srv",
+        "/Users",
+        "/Volumes",
+    }
+)
+
+_FORBIDDEN_WINDOWS_TREE_NAMES = frozenset(
+    {"windows", "program files", "program files (x86)", "programdata"}
+)
+
+_FORBIDDEN_MOUNT_DIR_NAMES = frozenset(
+    {
+        ".ssh",
+        ".tsh",
+        ".brev",
+        ".gnupg",
+        ".aws",
+        ".azure",
+        ".kube",
+        ".docker",
+        ".config",
+        ".npm",
+        ".pki",
+        ".terraform.d",
+    }
+)
+
+
+def _is_within(path: Path, ancestor: Path) -> bool:
+    ancestor_parts = [part.casefold() for part in ancestor.parts]
+    path_parts = [part.casefold() for part in path.parts]
+    return path_parts[: len(ancestor_parts)] == ancestor_parts
+
+
+def check_mountable_dir(path: Path) -> None:
+    resolved = path.resolve()
+    if not resolved.is_dir():
+        raise ValueError(f"'{path}' is not an existing directory.")
+
+    # Both the literal and the resolved form: macOS reaches /etc through the
+    # /private/etc symlink, and only the resolved path is compared below.
+    exact = {str(Path(root)).casefold() for root in _FORBIDDEN_MOUNT_ROOTS}
+    exact |= {str(Path(root).resolve()).casefold() for root in _FORBIDDEN_MOUNT_ROOTS}
+    exact.add(str(Path.home().resolve()).casefold())
+    tree_roots = set(_FORBIDDEN_MOUNT_TREES)
+    if os.name == "nt":
+        drive = Path(resolved.anchor)
+        tree_roots |= {str(drive / name) for name in _FORBIDDEN_WINDOWS_TREE_NAMES}
+        exact.add(str(drive / "Users").casefold())
+    trees = [Path(root) for root in tree_roots] + [Path(root).resolve() for root in tree_roots]
+    if (
+        str(resolved).casefold() in exact
+        or resolved.parent == resolved
+        or any(_is_within(resolved, tree) for tree in trees)
+    ):
+        raise ValueError(
+            f"Refusing to mount '{resolved}' into the sandbox: it is a system "
+            "or home directory, not a codebase. Point the target at the "
+            "project directory you want tested."
+        )
+
+    credential = next(
+        (part for part in resolved.parts if part.casefold() in _FORBIDDEN_MOUNT_DIR_NAMES), None
+    )
+    if credential is not None:
+        raise ValueError(
+            f"Refusing to mount '{resolved}' into the sandbox: '{credential}' "
+            "holds credentials, not code."
+        )
+
+
+def dedupe_local_targets(targets_info: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    seen_paths: set[str] = set()
+    for target in targets_info:
+        details = target.get("details") or {}
+        path = details.get("target_path")
+        if target.get("type") != "local_code" or not path:
+            result.append(target)
+            continue
+        if path not in seen_paths:
+            seen_paths.add(path)
+            result.append(target)
+    return result
 
 
 def _is_localhost_host(host: str) -> bool:
@@ -640,7 +1474,7 @@ def _is_localhost_host(host: str) -> bool:
 
 
 def rewrite_localhost_targets(targets_info: list[dict[str, Any]], host_gateway: str) -> None:
-    from yarl import URL  # type: ignore[import-not-found]
+    from yarl import URL
 
     for target_info in targets_info:
         target_type = target_info.get("type")
@@ -662,7 +1496,62 @@ def rewrite_localhost_targets(targets_info: list[dict[str, Any]], host_gateway: 
                 details["target_ip"] = host_gateway
 
 
-# Repository utilities
+#: API spec targets are copied into one workspace directory rather than mounted
+#: from wherever they happen to live on the host.
+API_SPEC_WORKSPACE_SUBDIR = "api-specs"
+
+
+def write_fetched_collection(collection: dict[str, Any], collection_uid: str) -> str:
+    """Write a collection fetched from the Postman API to a local file.
+
+    Returns the file path, so a ``postman://`` target continues as an ordinary
+    spec file from here on and the API key never leaves the host.
+    """
+    staging = Path(tempfile.gettempdir()) / "strix_api_specs" / "fetched"
+    staging.mkdir(parents=True, exist_ok=True)
+    path = staging / f"{sanitize_name(collection_uid)}.postman_collection.json"
+    path.write_text(json.dumps(collection, indent=2), encoding="utf-8")
+    return str(path)
+
+
+def stage_api_specs(targets_info: list[dict[str, Any]], run_name: str) -> list[dict[str, Any]]:
+    """Copy every ``api_spec`` target into one directory for the sandbox.
+
+    A spec is a single file the agent reads, not a tree it works in, so it is
+    copied to a per-run staging directory that is exposed at
+    ``/workspace/api-specs`` instead of mounting its host location. Each target's
+    ``workspace_path`` records where the agent will find it.
+    """
+    specs = [t for t in targets_info if t.get("type") == "api_spec"]
+    if not specs:
+        return []
+
+    staging = Path(tempfile.gettempdir()) / "strix_api_specs" / run_name
+    staging.mkdir(parents=True, exist_ok=True)
+
+    used: set[str] = set()
+    for target in specs:
+        details = target["details"]
+        source = Path(str(details["target_spec"]))
+        name = source.name
+        stem, suffix = source.stem, source.suffix
+        count = 1
+        while name in used:
+            count += 1
+            name = f"{stem}-{count}{suffix}"
+        used.add(name)
+        shutil.copy2(source, staging / name)
+        details["workspace_path"] = f"/workspace/{API_SPEC_WORKSPACE_SUBDIR}/{name}"
+
+    return [
+        {
+            "source_path": str(staging),
+            "workspace_subdir": API_SPEC_WORKSPACE_SUBDIR,
+            "protect_metadata": False,
+        }
+    ]
+
+
 def clone_repository(repo_url: str, run_name: str, dest_name: str | None = None) -> str:
     console = Console()
 
@@ -700,57 +1589,31 @@ def clone_repository(repo_url: str, run_name: str, dest_name: str | None = None)
         return str(clone_path.absolute())
 
     except subprocess.CalledProcessError as e:
-        error_text = Text()
-        error_text.append("REPOSITORY CLONE FAILED", style="bold red")
-        error_text.append("\n\n", style="white")
-        error_text.append(f"Could not clone repository: {repo_url}\n", style="white")
-        error_text.append(
-            f"Error: {e.stderr if hasattr(e, 'stderr') and e.stderr else str(e)}", style="dim red"
-        )
-
-        panel = Panel(
-            error_text,
-            title="[bold white]STRIX",
-            title_align="left",
-            border_style="red",
-            padding=(1, 2),
-        )
-        console.print("\n")
-        console.print(panel)
-        console.print()
-        sys.exit(1)
-    except FileNotFoundError:
-        error_text = Text()
-        error_text.append("GIT NOT FOUND", style="bold red")
-        error_text.append("\n\n", style="white")
-        error_text.append("Git is not installed or not available in PATH.\n", style="white")
-        error_text.append("Please install Git to clone repositories.\n", style="white")
-
-        panel = Panel(
-            error_text,
-            title="[bold white]STRIX",
-            title_align="left",
-            border_style="red",
-            padding=(1, 2),
-        )
-        console.print("\n")
-        console.print(panel)
-        console.print()
-        sys.exit(1)
+        detail = e.stderr if hasattr(e, "stderr") and e.stderr else str(e)
+        raise ValueError(f"Could not clone repository {repo_url}: {detail}") from e
+    except FileNotFoundError as e:
+        raise ValueError(
+            "Git is not installed or not available in PATH. "
+            "Please install Git to clone repositories."
+        ) from e
 
 
-# Docker utilities
 def check_docker_connection() -> Any:
+    from strix.runtime.docker_connection import DockerConnectionError, connect_docker
+
     try:
-        return docker.from_env()
-    except DockerException:
+        return connect_docker()
+    except DockerConnectionError as exc:
+        report_error("docker_unavailable", exc.cause)
         console = Console()
         error_text = Text()
         error_text.append("DOCKER NOT AVAILABLE", style="bold red")
         error_text.append("\n\n", style="white")
-        error_text.append("Cannot connect to Docker daemon.\n", style="white")
+        error_text.append(f"Cannot connect to Docker at {exc.endpoint.label}.\n", style="white")
+        error_text.append(f"{exc.detail}\n\n", style="dim red")
         error_text.append(
-            "Please ensure Docker Desktop is installed and running, and try running strix again.\n",
+            "Make sure Docker is running. If `docker info` works in this shell, strix uses "
+            "the same daemon. Otherwise set DOCKER_HOST.\n",
             style="white",
         )
 
@@ -762,10 +1625,12 @@ def check_docker_connection() -> Any:
             padding=(1, 2),
         )
         console.print("\n", panel, "\n")
-        raise RuntimeError("Docker not available") from None
+        sys.exit(1)
 
 
 def image_exists(client: Any, image_name: str) -> bool:
+    from docker.errors import ImageNotFound
+
     try:
         client.images.get(image_name)
     except ImageNotFound:
@@ -815,12 +1680,6 @@ def process_pull_line(
     return last_update
 
 
-# LLM utilities
-def validate_llm_response(response: Any) -> None:
-    if not response or not response.choices or not response.choices[0].message.content:
-        raise RuntimeError("Invalid response from LLM")
-
-
 def validate_config_file(config_path: str) -> Path:
     console = Console()
     path = Path(config_path)
@@ -849,3 +1708,83 @@ def validate_config_file(config_path: str) -> Path:
         sys.exit(1)
 
     return path
+
+
+# --- Workspace files -------------------------------------------------------
+#
+# ``--workspace-file`` places a single host file into the sandbox workspace,
+# outside every target tree. Content rides the same upload as the target
+# sources, so a large file makes session bring-up slower.
+
+
+def _workspace_file_dest(spec: str, source: Path) -> str:
+    """Return the workspace-relative destination declared by ``spec``."""
+    _, sep, dest = spec.rpartition(":")
+    candidate = dest.strip() if sep and dest.strip() else source.name
+    if candidate.startswith("/") or Path(candidate).is_absolute():
+        if not candidate.startswith("/workspace/"):
+            raise ValueError(
+                f"'{spec}' must land inside the workspace: use a relative "
+                "destination or a path under /workspace"
+            )
+        candidate = candidate.removeprefix("/workspace/")
+    candidate = candidate.strip("/")
+    if not candidate:
+        raise ValueError(f"'{spec}' has an empty destination path")
+    if any(part in ("", ".", "..") for part in candidate.split("/")):
+        raise ValueError(f"'{spec}' has an invalid destination path: {candidate}")
+    # A control character would let the path span more than the one line it is
+    # rendered on in the agent task, so the whole spec is rejected.
+    if any(ord(char) < 0x20 or ord(char) == 0x7F for char in candidate):
+        raise ValueError(f"'{spec}' has a control character in its destination path")
+    return candidate
+
+
+def resolve_workspace_files(specs: list[str] | None) -> list[dict[str, str]]:
+    """Validate ``PATH[:DEST]`` specs into source/destination pairs.
+
+    Each spec names a readable host file. ``DEST`` is the path inside
+    ``/workspace``; it defaults to the file name. Raises ``ValueError`` with a
+    user-facing message when a spec is unusable.
+    """
+    resolved: list[dict[str, str]] = []
+    seen: dict[str, str] = {}
+    for spec in specs or []:
+        raw, sep, dest = spec.rpartition(":")
+        source_text = raw if sep and dest.strip() else spec
+        source = Path(source_text.strip()).expanduser()
+        if not source.is_file():
+            raise ValueError(f"'{source}' is not an existing file")
+        try:
+            with source.open("rb"):
+                pass
+        except OSError as error:
+            raise ValueError(f"Cannot read '{source}': {error}") from error
+        workspace_rel = _workspace_file_dest(spec, source)
+        if workspace_rel in seen:
+            raise ValueError(
+                f"Two workspace files target /workspace/{workspace_rel}: "
+                f"'{seen[workspace_rel]}' and '{source}'"
+            )
+        seen[workspace_rel] = str(source)
+        resolved.append(
+            {
+                "source_path": str(source.resolve()),
+                "workspace_path": f"/workspace/{workspace_rel}",
+            }
+        )
+    return resolved
+
+
+def read_workspace_files(workspace_files: list[dict[str, str]] | None) -> list[dict[str, Any]]:
+    """Read resolved workspace files into engine ``extra_files`` entries."""
+    entries: list[dict[str, Any]] = []
+    for workspace_file in workspace_files or []:
+        source = Path(workspace_file["source_path"])
+        entries.append(
+            {
+                "workspace_path": workspace_file["workspace_path"],
+                "content": source.read_bytes(),
+            }
+        )
+    return entries

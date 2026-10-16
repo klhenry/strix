@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 logger = logging.getLogger(__name__)
@@ -21,7 +25,7 @@ async def generate_pdf_report(html_path: Path, output_path: Path) -> Path | None
 
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch()
+            browser = await p.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"])
             page = await browser.new_page()
 
             file_url = html_path.resolve().as_uri()

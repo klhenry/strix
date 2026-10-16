@@ -12,7 +12,7 @@ import signal
 import tempfile
 from multiprocessing.reduction import ForkingPickler
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 
 if TYPE_CHECKING:
@@ -42,8 +42,11 @@ class ScanWorker:
 
     def send(self, command: str, **payload: Any) -> bool:
         if (
-            self.connection is None or not self.ready or self._closing
-            or self._sender is None or self._sender.done()
+            self.connection is None
+            or not self.ready
+            or self._closing
+            or self._sender is None
+            or self._sender.done()
         ):
             return False
         data = bytes(ForkingPickler.dumps({"command": command, **payload}))
@@ -136,7 +139,7 @@ class ScanWorker:
                     self.progress = message["progress"]
                     self.agent_ready = message.get("agent_ready", False)
                 elif message["type"] == "result":
-                    return message
+                    return cast("dict[str, Any]", message)
         except (EOFError, OSError):
             pass
         return None
@@ -154,9 +157,11 @@ class ScanWorker:
             while self.process.is_alive() and asyncio.get_running_loop().time() < deadline:
                 self._receive()
                 if not sent_cancel and self.ready:
-                    self._commands.put_nowait(bytes(ForkingPickler.dumps(
-                        {"command": "cancel", "reason": self.stop_reason}
-                    )))
+                    self._commands.put_nowait(
+                        bytes(
+                            ForkingPickler.dumps({"command": "cancel", "reason": self.stop_reason})
+                        )
+                    )
                     sent_cancel = True
                 await asyncio.sleep(POLL_SECONDS)
             if self.process.is_alive():
@@ -193,20 +198,21 @@ class ScanWorker:
 
 async def _run_worker(connection: Connection, request: dict[str, Any]) -> None:
     from strix.web.services.run_store import RunStore
-    from strix.web.services.runtime_check import scan_runtime
     from strix.web.services.scan_manager import ScanManager, ScanState
 
     manager = ScanManager(RunStore(Path(request["runs_dir"])))
     run_name = request["run_name"]
 
     async def execute() -> None:
-        async with scan_runtime(Path(request["workspace"])):
-            await manager._run_scan_in_process(
-                run_name,
-                request["targets"],
-                request["scan_mode"],
-                request["instruction"],
-            )
+        from strix.web.services.runtime_check import check_dependencies
+
+        check_dependencies()
+        await manager._run_scan_in_process(
+            run_name,
+            request["targets"],
+            request["scan_mode"],
+            request["instruction"],
+        )
 
     task = asyncio.create_task(execute())
     state = ScanState(task=task, run_name=run_name, scan_mode=request["scan_mode"])
@@ -257,11 +263,14 @@ def _worker_entry(connection: Connection, request: dict[str, Any]) -> None:
     # A separate process group lets pause/stop include this worker's tools only.
     os.setsid()
     logging.basicConfig(level=logging.INFO)
-    os.environ["STRIX_SANDBOX_MODE"] = "true"
-    os.environ["STRIX_STANDALONE"] = "true"
+    os.environ.setdefault("STRIX_RUNTIME_BACKEND", "railway")
+    os.environ["STRIX_TELEMETRY"] = "0"
+    os.environ["OPENAI_AGENTS_DISABLE_TRACING"] = "1"
     os.environ["STRIX_RUNS_DIR"] = request["runs_dir"]
     os.environ["STRIX_WORKSPACE"] = request["workspace"]
     os.environ["STRIX_RUNTIME_DIR"] = request["runtime_dir"]
+    if request.get("model"):
+        os.environ["STRIX_LLM"] = request["model"]
     connection.send({"type": "started"})
     try:
         asyncio.run(_run_worker(connection, request))

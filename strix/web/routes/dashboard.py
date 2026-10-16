@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
@@ -16,11 +18,14 @@ async def dashboard(request: Request) -> HTMLResponse:
     templates = request.app.state.templates
 
     runs = run_store.list_runs()
-    return templates.TemplateResponse(
-        request,
-        "dashboard.html",
-        {
-            "runs": runs,
-            "active_scan": scan_manager.active_run_name,
-        },
+    return cast(
+        "HTMLResponse",
+        templates.TemplateResponse(
+            request,
+            "dashboard.html",
+            {
+                "runs": runs,
+                "active_scan": scan_manager.active_run_name,
+            },
+        ),
     )
