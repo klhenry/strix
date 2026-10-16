@@ -59,7 +59,14 @@
           "fix_before": "const query = `SELECT * FROM users WHERE name = ${name}`;",
           "fix_after": "const query = 'SELECT * FROM users WHERE name = $1';\nconst result = await db.query(query, [name]);"
         }
-      ]
+      ],
+      "evidence": "",
+      "confidence": "",
+      "confidence_rationale": "",
+      "counterevidence": "",
+      "assumptions": "",
+      "severity_change_conditions": "",
+      "finding_class": "dynamic"
     },
     {
       "id": "vuln-0002",
@@ -88,7 +95,14 @@
       "method": "GET",
       "cve": null,
       "cwe": "CWE-79",
-      "code_locations": []
+      "code_locations": [],
+      "evidence": "",
+      "confidence": "",
+      "confidence_rationale": "",
+      "counterevidence": "",
+      "assumptions": "",
+      "severity_change_conditions": "",
+      "finding_class": "dynamic"
     },
     {
       "id": "vuln-0003",
@@ -108,7 +122,14 @@
       "method": "POST",
       "cve": null,
       "cwe": null,
-      "code_locations": []
+      "code_locations": [],
+      "evidence": "",
+      "confidence": "",
+      "confidence_rationale": "",
+      "counterevidence": "",
+      "assumptions": "",
+      "severity_change_conditions": "",
+      "finding_class": "dynamic"
     }
   ],
   "executive_summary": "Testing identified 3 vulnerabilities: 1 critical SQL injection, 1 high XSS, and 1 medium missing rate limit.",

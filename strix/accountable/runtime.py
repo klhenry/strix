@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import os
 import socket
+import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -129,6 +131,8 @@ async def railway_backend(
             if os.environ.get("STRIX_PROXY_CA_P12")
             else []
         )
+        proxy_log = workspace / ".proxy-startup.log"
+        log_handle = proxy_log.open("wb")
         client.proxy = await asyncio.create_subprocess_exec(
             "caido-cli",
             "--listen",
@@ -139,10 +143,47 @@ async def railway_backend(
             "--no-open",
             "--no-logging",
             *cert_args,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
+            stdout=log_handle,
+            stderr=log_handle,
         )
+        log_handle.close()
         await session.start()
+
+        def probe() -> bool:
+            body = json.dumps(
+                {"query": "mutation { loginAsGuest { token { accessToken } } }"}
+            ).encode()
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{session._inner.proxy_port}/graphql",
+                data=body,
+                headers={"Content-Type": "application/json"},
+            )
+            try:
+                with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
+                    request, timeout=2
+                ) as response:
+                    return bool(
+                        json.load(response)
+                        .get("data", {})
+                        .get("loginAsGuest", {})
+                        .get("token", {})
+                        .get("accessToken")
+                    )
+            except Exception:
+                return False
+
+        for _ in range(40):
+            if client.proxy.returncode is not None:
+                raise RuntimeError(
+                    f"Caido exited ({client.proxy.returncode}): {proxy_log.read_text(errors='replace')[-3000:]}"
+                )
+            if await asyncio.to_thread(probe):
+                break
+            await asyncio.sleep(0.5)
+        else:
+            raise RuntimeError(
+                f"Caido startup timed out: {proxy_log.read_text(errors='replace')[-3000:]}"
+            )
     except BaseException:
         with contextlib.suppress(Exception):
             await client.delete(session)

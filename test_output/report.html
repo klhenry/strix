@@ -527,6 +527,15 @@ code { font-family: inherit; }
     .finding-card { page-break-inside: avoid; }
     .toc a { color: inherit; }
 }
+
+.finding-text { white-space: normal; overflow-wrap: anywhere; }
+.finding-text p, .callout p { margin: 0 0 10px; }
+.finding-text ul, .finding-text ol, .callout ul, .callout ol, .actual-tools { margin: 8px 0 16px 22px; }
+.finding-text h2, .finding-text h3 { margin: 18px 0 8px; }
+.finding-text table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 12px; }
+.finding-text th, .finding-text td { padding: 7px; border: 1px solid #e2e8f0; vertical-align: top; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media print { tr { break-inside: avoid; } .report-table { break-inside: auto; } }
 </style>
 </head>
 <body>
@@ -543,11 +552,12 @@ code { font-family: inherit; }
   
 
   <div class="cover-meta">
-    <div>Report Date: <strong>2026-10-16 04:30:56 UTC</strong></div>
+    <div>Report Date: <strong>2026-10-16 04:34:24 UTC</strong></div>
     
     <div>Test Period: <strong>2026-03-23 &ndash; 2026-03-23</strong></div>
     
     <div>Report ID: <strong>TEST-RUN-001</strong></div>
+    <div>Status: <strong>COMPLETED</strong></div>
     <div>Classification: <strong>CONFIDENTIAL</strong></div>
     <div>Prepared By: <strong>Accountable HQ</strong></div>
   </div>
@@ -619,7 +629,8 @@ code { font-family: inherit; }
 
   
   <div class="callout">
-    <strong>What This Means:</strong> Testing identified 3 vulnerabilities: 1 critical SQL injection, 1 high XSS, and 1 medium missing rate limit.
+    <strong>What This Means:</strong> <p>Testing identified 3 vulnerabilities: 1 critical SQL injection, 1 high XSS, and 1 medium missing rate limit.</p>
+
   </div>
   
 
@@ -656,7 +667,8 @@ code { font-family: inherit; }
 
   
   <h2 class="sub-heading">Key Takeaways</h2>
-  <div class="finding-text">The application has significant input validation gaps across multiple endpoints.</div>
+  <div class="finding-text"><p>The application has significant input validation gaps across multiple endpoints.</p>
+</div>
   
 </div>
 
@@ -686,7 +698,8 @@ code { font-family: inherit; }
 
   <h2 class="sub-heading">2.2 Methodology</h2>
   
-  <div class="finding-text">Testing followed OWASP WSTG methodology with automated and manual techniques.</div>
+  <div class="finding-text"><p>Testing followed OWASP WSTG methodology with automated and manual techniques.</p>
+</div>
   
 
   <h2 class="sub-heading">2.3 Testing Parameters</h2>
@@ -782,13 +795,15 @@ code { font-family: inherit; }
 
 
 <div class="callout">
-  <strong>What This Means:</strong> User input is passed directly to a SQL query without sanitization.
+  <strong>What This Means:</strong> <p>User input is passed directly to a SQL query without sanitization.</p>
+
 </div>
 
 
 
 <div class="finding-section-title">Technical Description</div>
-<div class="finding-text">The /api/login endpoint concatenates the username parameter directly into a SQL query string.</div>
+<div class="finding-text"><p>The /api/login endpoint concatenates the username parameter directly into a SQL query string.</p>
+</div>
 
 
 
@@ -810,7 +825,8 @@ code { font-family: inherit; }
 
 <div class="finding-section-title">Evidence</div>
 
-<div class="finding-text">Send a single quote in the username field to trigger a SQL error.</div>
+<div class="finding-text"><p>Send a single quote in the username field to trigger a SQL error.</p>
+</div>
 
 
 <pre><code>curl -X POST https://example.com/api/login -d &#34;user=admin&#39;--&amp;pass=x&#34;</code></pre>
@@ -821,16 +837,32 @@ code { font-family: inherit; }
 
 
 <div class="finding-section-title">Impact</div>
-<div class="finding-text">An attacker can extract the entire database, modify data, or escalate privileges.</div>
+<div class="finding-text"><p>An attacker can extract the entire database, modify data, or escalate privileges.</p>
+</div>
 
 
 
 <div class="finding-section-title">Remediation Steps</div>
-<div class="finding-text">Use parameterized queries instead of string concatenation.</div>
+<div class="finding-text"><p>Use parameterized queries instead of string concatenation.</p>
+</div>
 
 
 
 <hr style="border:none;border-top:1px solid #e2e8f0;margin:32px 0;">
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
   
   
@@ -848,13 +880,15 @@ code { font-family: inherit; }
 
 
 <div class="callout">
-  <strong>What This Means:</strong> Reflected XSS in the search parameter allows script injection.
+  <strong>What This Means:</strong> <p>Reflected XSS in the search parameter allows script injection.</p>
+
 </div>
 
 
 
 <div class="finding-section-title">Technical Description</div>
-<div class="finding-text">The search query parameter is reflected in the response without encoding.</div>
+<div class="finding-text"><p>The search query parameter is reflected in the response without encoding.</p>
+</div>
 
 
 
@@ -862,7 +896,8 @@ code { font-family: inherit; }
 
 <div class="finding-section-title">Evidence</div>
 
-<div class="finding-text">Inject a script tag via the search parameter.</div>
+<div class="finding-text"><p>Inject a script tag via the search parameter.</p>
+</div>
 
 
 <pre><code>curl &#34;https://example.com/search?q=&lt;script&gt;alert(1)&lt;/script&gt;&#34;</code></pre>
@@ -873,16 +908,32 @@ code { font-family: inherit; }
 
 
 <div class="finding-section-title">Impact</div>
-<div class="finding-text">Session hijacking, credential theft, defacement.</div>
+<div class="finding-text"><p>Session hijacking, credential theft, defacement.</p>
+</div>
 
 
 
 <div class="finding-section-title">Remediation Steps</div>
-<div class="finding-text">HTML-encode all user input before rendering in the page.</div>
+<div class="finding-text"><p>HTML-encode all user input before rendering in the page.</p>
+</div>
 
 
 
 <hr style="border:none;border-top:1px solid #e2e8f0;margin:32px 0;">
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
   
   
@@ -900,13 +951,15 @@ code { font-family: inherit; }
 
 
 <div class="callout">
-  <strong>What This Means:</strong> The password reset endpoint has no rate limiting.
+  <strong>What This Means:</strong> <p>The password reset endpoint has no rate limiting.</p>
+
 </div>
 
 
 
 <div class="finding-section-title">Technical Description</div>
-<div class="finding-text">No rate limit headers observed; 1000 requests in 10 seconds all returned 200.</div>
+<div class="finding-text"><p>No rate limit headers observed; 1000 requests in 10 seconds all returned 200.</p>
+</div>
 
 
 
@@ -914,7 +967,8 @@ code { font-family: inherit; }
 
 <div class="finding-section-title">Evidence</div>
 
-<div class="finding-text">Send rapid password reset requests.</div>
+<div class="finding-text"><p>Send rapid password reset requests.</p>
+</div>
 
 
 <pre><code>for i in range(1000):
@@ -926,12 +980,28 @@ code { font-family: inherit; }
 
 
 <div class="finding-section-title">Impact</div>
-<div class="finding-text">Brute-force attacks on reset tokens or email flooding.</div>
+<div class="finding-text"><p>Brute-force attacks on reset tokens or email flooding.</p>
+</div>
 
 
 
 <div class="finding-section-title">Remediation Steps</div>
-<div class="finding-text">Add rate limiting (e.g., 5 requests per minute per IP).</div>
+<div class="finding-text"><p>Add rate limiting (e.g., 5 requests per minute per IP).</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -989,9 +1059,12 @@ code { font-family: inherit; }
 
   
   <h2 class="sub-heading">Recommendations</h2>
-  <div class="finding-text">1. Immediately fix the SQL injection.
-2. Implement output encoding for XSS.
-3. Add rate limiting to sensitive endpoints.</div>
+  <div class="finding-text"><ol>
+<li>Immediately fix the SQL injection.</li>
+<li>Implement output encoding for XSS.</li>
+<li>Add rate limiting to sensitive endpoints.</li>
+</ol>
+</div>
   
 </div>
 
@@ -1007,16 +1080,9 @@ code { font-family: inherit; }
   <h1 class="section-heading" id="testing-tools">6. Testing Tools &amp; Techniques</h1>
   <div class="section-divider"></div>
 
-  <table class="report-table">
-    <thead><tr><th>Phase</th><th>Tools</th><th>Purpose</th></tr></thead>
-    <tbody>
-      <tr><td><strong>Reconnaissance</strong></td><td>Nmap, Subfinder, DNS enumeration</td><td>Service discovery, port scanning, attack surface mapping</td></tr>
-      <tr><td><strong>Web App Testing</strong></td><td>Caido, Nuclei, custom scripts</td><td>OWASP Top 10, authentication testing, session analysis</td></tr>
-      <tr><td><strong>API Testing</strong></td><td>Custom scripts, fuzzing tools</td><td>Endpoint discovery, input validation, authorization testing</td></tr>
-      <tr><td><strong>Code Analysis</strong></td><td>Semgrep, manual review</td><td>Static analysis, pattern matching, vulnerability identification</td></tr>
-      <tr><td><strong>Exploitation</strong></td><td>SQLmap, custom PoC scripts</td><td>Vulnerability validation, impact demonstration</td></tr>
-    </tbody>
-  </table>
+  
+  <p>No testing techniques were recorded for this run. Refer to the methodology and limitations.</p>
+  
 </div>
 
 
@@ -1098,7 +1164,7 @@ code { font-family: inherit; }
 
 <div class="page-footer">
   <span>Accountable HQ &nbsp;|&nbsp; accountablehq.com</span>
-  <span>2026-10-16 04:30:56 UTC</span>
+  <span>2026-10-16 04:34:24 UTC</span>
 </div>
 
 </body>

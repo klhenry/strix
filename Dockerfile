@@ -16,7 +16,7 @@ RUN mkdir -p /app/certs && openssl req -x509 -newkey rsa:2048 -nodes \
     && cp /app/certs/ca.crt /usr/local/share/ca-certificates/scan-proxy.crt \
     && update-ca-certificates
 RUN pip install --no-cache-dir uv==0.13.1
-COPY . .
+COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --extra web --no-dev --no-install-project
 ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
@@ -26,6 +26,7 @@ RUN case "$(uname -m)" in x86_64) CAIDO_ARCH=x86_64 ;; aarch64|arm64) CAIDO_ARCH
     && chmod +x /usr/local/bin/caido-cli && rm /tmp/caido.tar.gz
 RUN npm install -g agent-browser@0.26.0 && npm cache clean --force \
     && python -m playwright install --with-deps chromium
+COPY . .
 COPY strix/tools/proxy/caido_api.py /opt/strix-python/caido_api.py
 ENV PYTHONPATH=/app:/opt/strix-python
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
