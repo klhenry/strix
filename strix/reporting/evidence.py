@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import base64
 import logging
+from io import BytesIO
 from typing import TYPE_CHECKING
+
+from PIL import Image, UnidentifiedImageError
 
 
 if TYPE_CHECKING:
@@ -12,6 +15,28 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_screenshot(payload: bytes) -> bytes:
+    """Decode bounded raster evidence and emit PNG, removing source metadata."""
+    try:
+        with Image.open(BytesIO(payload)) as image:
+            if image.width * image.height > 20_000_000:
+                raise ValueError("Screenshot exceeds 20 megapixels; crop or resize it first")
+            image.load()
+            output = BytesIO()
+            # Flatten transparency onto white: simply dropping alpha can expose
+            # RGB pixels hidden by a transparent redaction. Start with a fresh
+            # image so EXIF, comments and other source metadata cannot follow.
+            rgba = image.convert("RGBA")
+            converted = Image.new("RGB", image.size, "white")
+            converted.paste(rgba, mask=rgba.getchannel("A"))
+            converted.save(output, format="PNG")
+            if output.tell() > 10 * 1024 * 1024:
+                raise ValueError("Normalized screenshot exceeds 10 MiB; crop or resize it first")
+            return output.getvalue()
+    except (UnidentifiedImageError, Image.DecompressionBombError, OSError) as exc:
+        raise ValueError("Screenshot must be a valid raster image") from exc
 
 
 def collect_evidence(run_dir: Path) -> dict[str, list[Path]]:
@@ -28,7 +53,11 @@ def collect_evidence(run_dir: Path) -> dict[str, list[Path]]:
     image_extensions = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 
     for file_path in sorted(evidence_dir.iterdir()):
-        if file_path.suffix.lower() not in image_extensions:
+        if (
+            file_path.suffix.lower() not in image_extensions
+            or not file_path.is_file()
+            or file_path.is_symlink()
+        ):
             continue
         # Group by stem prefix: screenshot_browser_20260323_143000 -> "general"
         # or vuln-0001_screenshot_... -> "vuln-0001"

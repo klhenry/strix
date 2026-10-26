@@ -555,6 +555,39 @@ async def test_legacy_app_preset_reaches_worker_and_retry_is_idempotent(manager_
     assert manager.instruction_presets.consume(req) == ""
 
 
+@pytest.mark.parametrize("scan_type", ["penetration_test", "vulnerability_scan"])
+@pytest.mark.parametrize(
+    ("configured", "requested", "expected"),
+    [
+        (None, None, "openrouter/deepseek/deepseek-v4.1-flash-1017"),
+        ("openrouter/operator-model", None, "openrouter/operator-model"),
+        ("openrouter/operator-model", "openrouter/request-model", "openrouter/request-model"),
+    ],
+)
+async def test_scan_model_selection_and_screenshot_report_tool(
+    running_scan_harness, monkeypatch, scan_type, configured, requested, expected
+):
+    from types import SimpleNamespace
+
+    from strix.accountable.report_tool import accountable_create_vulnerability_report
+
+    monkeypatch.setattr(
+        "strix.config.load_settings",
+        lambda: SimpleNamespace(
+            llm=SimpleNamespace(model=configured), runtime=SimpleNamespace(image="fixture-image")
+        ),
+    )
+    harness = running_scan_harness
+    await harness["manager"].start_webhook_scan(_request(scan_type=scan_type, model=requested))
+    await asyncio.wait_for(harness["started"].wait(), timeout=5)
+    assert harness["execute"].call_args.kwargs["model"] == expected
+    assert (
+        harness["execute"].call_args.kwargs["report_tool"]
+        is accountable_create_vulnerability_report
+    )
+    harness["release"].set()
+
+
 @pytest.mark.parametrize(
     "target",
     [
