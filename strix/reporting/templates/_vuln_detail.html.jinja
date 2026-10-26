@@ -48,8 +48,11 @@
 
 {% if evidence.get(vuln.id) %}
 <div class="finding-section-title">Screenshots</div>
-{% for img_data in evidence[vuln.id] %}
-<img class="evidence-img" src="data:image/png;base64,{{ img_data }}" alt="Evidence for {{ vuln.id }}">
+{% for image in evidence[vuln.id] %}
+<figure class="evidence-figure">
+  <img class="evidence-img" src="data:image/png;base64,{{ image.data }}" alt="Evidence for {{ vuln.id }}">
+  <figcaption>{{ image.caption }}</figcaption>
+</figure>
 {% endfor %}
 {% endif %}
 

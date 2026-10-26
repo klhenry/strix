@@ -17,6 +17,27 @@ returning `external_scan_id`. Existing signed heartbeat/completion callbacks and
 presigned PDF uploads are preserved. `model` optionally selects a provider model
 for one request; omitting it uses the deployed `STRIX_LLM` default.
 
+The web service and Railway image default to
+`openrouter/deepseek/deepseek-v4.1-flash-1017` (DeepSeek V4.1 Flash 1017).
+Existing Railway variables override image defaults: set `STRIX_LLM` to that exact
+ID when deploying this update. Per-request `model` overrides remain supported.
+
+## Screenshot evidence
+
+Browser-visible findings can include `screenshot_evidence` in
+`create_vulnerability_report`: a list of `{path, caption}` objects pointing to
+screenshots in the scan workspace. Agents capture images with `agent-browser`,
+inspect them with `view_image`, and crop/redact credentials and personal data
+before attachment. Use `null` when visual evidence is not applicable.
+
+The Accountable report adapter preserves upstream validation and deduplication,
+copies up to six reviewed images per finding into the persistent run's `evidence/`
+directory, normalizes them to PNG, and embeds them with captions in the finding's
+HTML and PDF. Attachments survive worker cleanup. Images are limited to 10 MiB
+and 20 megapixels each. General images already saved under `evidence/` appear in
+an assessment appendix; unreviewed browser screenshots are not automatically
+included. Both penetration tests and vulnerability scans use this report path.
+
 ## Scan budgets
 
 Web assessments have no dollar budget by default. Leave `STRIX_SCAN_BUDGET_USD`

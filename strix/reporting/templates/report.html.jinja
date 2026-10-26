@@ -181,6 +181,21 @@
 </div>
 {% endif %}
 
+{% if evidence.get('general') %}
+<div class="page-break"></div>
+<div class="page-content">
+  <h1 class="section-heading" id="assessment-screenshots">Assessment Screenshots</h1>
+  <div class="section-divider"></div>
+  <p>General testing context. These images alone do not establish a vulnerability.</p>
+  {% for image in evidence['general'] %}
+  <figure class="evidence-figure">
+    <img class="evidence-img" src="data:image/png;base64,{{ image.data }}" alt="Assessment evidence">
+    <figcaption>{{ image.caption }}</figcaption>
+  </figure>
+  {% endfor %}
+</div>
+{% endif %}
+
 {# ===== 7. APPENDIX: CVSS SEVERITY SCALE ===== #}
 <div class="page-break"></div>
 <div class="page-header">

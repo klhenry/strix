@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 MAX_CONCURRENT_SCANS = 3
+DEFAULT_SCAN_MODEL = "openrouter/deepseek/deepseek-v4.1-flash-1017"
 
 
 @dataclass
@@ -654,6 +655,7 @@ class ScanManager:
         """Run the current upstream SDK engine and preserve Accountable artifacts."""
         from strix.accountable.finish import accountable_finish_scan
         from strix.accountable.report_state import AccountableReportState
+        from strix.accountable.report_tool import accountable_create_vulnerability_report
         from strix.accountable.runtime import register_railway_backend
         from strix.config import load_settings
         from strix.core.agents import AgentCoordinator
@@ -703,6 +705,8 @@ class ScanManager:
                 max_budget_usd=float(budget) if budget else None,
                 event_sink=report.stream_event,
                 root_finish_tool=accountable_finish_scan,
+                report_tool=accountable_create_vulnerability_report,
+                model=(state.model if state else None) or settings.llm.model or DEFAULT_SCAN_MODEL,
                 mcp_connection_requests=[],
             )
             fields = report.scan_results or {}

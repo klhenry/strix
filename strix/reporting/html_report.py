@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import contextlib
+import json
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -8,7 +11,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from markdown_it import MarkdownIt
 from markupsafe import Markup
 
-from strix.reporting.evidence import collect_evidence, encode_evidence_base64
+from strix.reporting.evidence import collect_evidence, normalize_screenshot
 from strix.reporting.svg_charts import cvss_gauge, severity_bar_chart
 from strix.utils.resource_paths import get_strix_resource_path
 
@@ -58,21 +61,35 @@ def generate_html_report(
             cvss_gauges[vuln.id] = cvss_gauge(vuln.cvss)
 
     # Collect evidence images
-    evidence: dict[str, list[str]] = {}
+    evidence: dict[str, list[dict[str, str]]] = {}
     run_dir = output_path.parent
     evidence_dir = run_dir / "evidence"
     if evidence_dir.exists():
         raw_evidence = collect_evidence(run_dir)
         for key, paths in raw_evidence.items():
-            evidence[key] = [encode_evidence_base64(p) for p in paths if p.exists()]
+            evidence[key] = []
+            for path in paths:
+                try:
+                    if path.stat().st_size > 10 * 1024 * 1024:
+                        continue
+                    payload = normalize_screenshot(path.read_bytes())
+                except (OSError, ValueError):
+                    logger.warning("Skipping unreadable screenshot evidence: %s", path.name)
+                    continue
+                caption = "Captured assessment evidence"
+                metadata = path.with_suffix(".json")
+                if metadata.is_file() and not metadata.is_symlink():
+                    with contextlib.suppress(OSError, ValueError, KeyError, TypeError):
+                        caption = str(json.loads(metadata.read_text(encoding="utf-8"))["caption"])
+                evidence[key].append(
+                    {"data": base64.b64encode(payload).decode("ascii"), "caption": caption}
+                )
 
     generated_at = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     # Load logo image
     logo_path = template_dir / "_logo.png"
     if logo_path.exists():
-        import base64
-
         logo_b64 = base64.b64encode(logo_path.read_bytes()).decode("ascii")
     else:
         logo_b64 = ""

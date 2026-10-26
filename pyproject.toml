@@ -48,6 +48,7 @@ dependencies = [
   "markdown-it-py>=3.0.0",
   "reportlab>=4.0",
   "pypdf>=5.0",
+  "pillow>=12.0",
   # Cap <49: 49.x drops the universal2 macOS wheel (arm64-only), which breaks
   # the Intel macOS (macos-x86_64) release build's `uv sync --frozen`.
   "cryptography>=48.0.1,<49",

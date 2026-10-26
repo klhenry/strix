@@ -317,6 +317,8 @@ body {
 }
 
 .finding-section-title {
+    break-after: avoid;
+    page-break-after: avoid;
     font-size: 1.1rem;
     font-weight: 700;
     color: var(--brand-dark);
@@ -353,10 +355,25 @@ code { font-family: inherit; }
 .diff-line-remove { color: #991b1b; background: #fee2e2; display: block; }
 
 .evidence-img {
+    display: block;
     max-width: 100%;
+    max-height: 200mm;
+    object-fit: contain;
     border: 1px solid var(--color-border);
     border-radius: 4px;
     margin: 8px 0;
+}
+
+.evidence-figure {
+    margin: 16px 0;
+    break-inside: avoid;
+}
+
+.evidence-figure figcaption {
+    font-size: 10px;
+    color: var(--color-text-light);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
 }
 
 /* ==========================================================================

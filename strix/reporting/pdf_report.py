@@ -30,6 +30,10 @@ async def generate_pdf_report(html_path: Path, output_path: Path) -> Path | None
 
             file_url = html_path.resolve().as_uri()
             await page.goto(file_url, wait_until="networkidle")
+            await page.evaluate("""async () => {
+                await Promise.all(Array.from(document.images, image => image.decode()));
+                await document.fonts.ready;
+            }""")
 
             await page.pdf(
                 path=str(output_path),

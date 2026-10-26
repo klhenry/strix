@@ -36,6 +36,7 @@ ENV STRIX_PROXY_CA_P12=/app/certs/ca.p12
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 ENV STRIX_RUNTIME_BACKEND=railway
+ENV STRIX_LLM=openrouter/deepseek/deepseek-v4.1-flash-1017
 ENV STRIX_TELEMETRY=0
 ENV OPENAI_AGENTS_DISABLE_TRACING=1
 RUN printf '%s\n' 'export PATH="/app/.venv/bin:/usr/local/bin:$PATH"' \
